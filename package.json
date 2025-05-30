@@ -1,0 +1,42 @@
+{
+  "name": "pump-trading-bot",
+  "version": "1.0.0",
+  "description": "Automated trading bot for PumpFun tokens based on scanner alerts",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "NODE_ENV=development nodemon src/app.js",
+    "test": "NODE_ENV=test jest",
+    "logs": "tail -f logs/app.log",
+    "paper": "TRADING_MODE=paper node src/app.js",
+    "live": "TRADING_MODE=live node src/app.js"
+  },
+  "dependencies": {
+    "@pump-fun/pump-swap-sdk": "^0.0.1-beta.36",
+    "@solana/web3.js": "^1.87.6",
+    "@solana/spl-token": "^0.3.9",
+    "node-telegram-bot-api": "^0.66.0",
+    "dotenv": "^16.4.5",
+    "winston": "^3.17.0",
+    "axios": "^1.7.7",
+    "big.js": "^6.2.1",
+    "lodash": "^4.17.21",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.7"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "solana",
+    "trading",
+    "pumpfun",
+    "automated-trading",
+    "telegram-bot"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
