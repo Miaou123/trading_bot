@@ -9,7 +9,7 @@ async function testInternalSDK() {
     
     // Initialize connection
     const connection = new Connection(
-        process.env.HELIUS_RPC_URL || process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+        process.env.HELIUS_RPC_URL || 'https://api.mainnet-beta.solana.com',
         'confirmed'
     );
     

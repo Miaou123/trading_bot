@@ -1,4 +1,4 @@
-// src/bot/tradingBot.js - Trading Bot with Full Jupiter Integration (Swap + Price)
+// src/bot/tradingBot.js - FIXED: Price-based stop loss and take profits
 const { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction, ComputeBudgetProgram, VersionedTransaction } = require('@solana/web3.js');
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
@@ -19,9 +19,9 @@ class TradingBot extends EventEmitter {
             rpcUrl: process.env.SOLANA_RPC_URL || process.env.HELIUS_RPC_URL || 'https://api.mainnet-beta.solana.com',
             privateKey: process.env.PRIVATE_KEY,
             takeProfitLevels: [
-                { percentage: 100, sellPercentage: 50 },
-                { percentage: 300, sellPercentage: 25 },
-                { percentage: 900, sellPercentage: 100 }
+                { percentage: 100, sellPercentage: 50 },  // 2x (100% gain) - sell 50%
+                { percentage: 300, sellPercentage: 25 },  // 4x (300% gain) - sell 25%
+                { percentage: 900, sellPercentage: 100 }  // 10x (900% gain) - sell remaining
             ]
         };
 
@@ -87,17 +87,14 @@ class TradingBot extends EventEmitter {
 
     async initialize() {
         try {
-            logger.info('🔧 Initializing trading bot with full Jupiter integration...');
+            logger.info('🔧 Initializing trading bot with fixed price-based stop loss/take profits...');
             logger.info(`💰 Trading mode: ${this.config.tradingMode.toUpperCase()}`);
-            logger.info(`🌐 RPC: ${this.config.rpcUrl}`);
-            logger.info(`🪐 Jupiter Swap API: ${this.JUPITER_API_URL}`);
-            logger.info(`📊 Jupiter Price API: ${this.JUPITER_PRICE_API}`);
+            logger.info(`📊 Stop Loss: -${this.config.stopLossPercentage}% from entry price`);
+            logger.info(`🎯 Take Profits: +${this.config.takeProfitLevels.map(tp => tp.percentage + '%').join(', ')} from entry price`);
             
             if (this.config.tradingMode === 'live') {
                 logger.info(`🚀 LIVE TRADING: ✅ Real Jupiter swaps will be executed`);
-                logger.info(`📊 JUPITER PRICES: ✅ Real-time price tracking via Jupiter API`);
             } else {
-                logger.info(`📊 JUPITER PRICES: ✅ Real-time price tracking via Jupiter API`);
                 logger.info(`📝 PAPER TRADES: ✅ Simulating Jupiter swaps without execution`);
             }
             
@@ -113,7 +110,7 @@ class TradingBot extends EventEmitter {
             await this.testJupiterConnections();
 
             this.isInitialized = true;
-            logger.info('✅ Trading bot initialized with full Jupiter integration');
+            logger.info('✅ Trading bot initialized with FIXED price-based triggers');
         } catch (error) {
             logger.error('❌ Failed to initialize:', error);
             throw error;
@@ -122,22 +119,9 @@ class TradingBot extends EventEmitter {
 
     async testJupiterConnections() {
         try {
-            logger.info('🧪 Testing Jupiter API connections...');
+            logger.info('🧪 Testing Jupiter Quote API connection...');
             
-            // Test Price API
-            const priceResponse = await axios.get(`${this.JUPITER_PRICE_API}/price`, {
-                params: {
-                    ids: 'So11111111111111111111111111111111111111112' // SOL
-                },
-                timeout: 5000
-            });
-            
-            if (priceResponse.data && priceResponse.data.data) {
-                logger.info('✅ Jupiter Price API connection successful');
-                this.stats.priceApiCalls++;
-            }
-            
-            // Test Quote API
+            // 🔥 FIXED: Test Quote API only (remove broken Price API test)
             const quoteResponse = await axios.get(`${this.JUPITER_API_URL}/quote`, {
                 params: {
                     inputMint: this.SOL_MINT,
@@ -153,79 +137,57 @@ class TradingBot extends EventEmitter {
                 this.stats.jupiterQuotes++;
             }
             
+            // 🔥 Test actual price fetching via Quote API
+            logger.info('🧪 Testing price fetching via Quote API...');
+            const testPrice = await this.getTokenPriceViaQuote('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+            logger.info(`✅ Quote API price test: ${testPrice.toFixed(8)} SOL`);
+            
         } catch (error) {
-            logger.warn('⚠️ Jupiter API test failed:', error.message);
+            logger.warn('⚠️ Jupiter Quote API test failed:', error.message);
             logger.warn('Will retry on actual usage...');
         }
     }
 
-    // 🪐 NEW: Get token price using Jupiter Price API
+    // 🪐 Get token price using Jupiter Price API
     async getTokenPrice(tokenAddress, forceRefresh = false, priority = 'normal', poolAddress = null) {
         try {
             const now = Date.now();
             
-            // Check cache first (3 second cache - Jupiter updates every 2-3 seconds)
+            // Check cache first
             if (!forceRefresh && this.priceCache.has(tokenAddress)) {
                 const cached = this.priceCache.get(tokenAddress);
                 if (now - cached.timestamp < this.priceCacheTimeout) {
                     return cached.price;
                 }
             }
-
-            logger.debug(`🪐 Getting Jupiter price for ${tokenAddress}...`);
-
-            // Get price from Jupiter Price API
-            const response = await axios.get(`${this.JUPITER_PRICE_API}/price`, {
-                params: {
-                    ids: tokenAddress,
-                    vsToken: this.SOL_MINT // Price in SOL
-                },
-                timeout: 3000
-            });
-
-            this.stats.priceApiCalls++;
-
-            if (!response.data || !response.data.data || !response.data.data[tokenAddress]) {
-                throw new Error('No price data returned from Jupiter');
-            }
-
-            const priceData = response.data.data[tokenAddress];
-            const price = parseFloat(priceData.price);
-
-            if (!price || price <= 0) {
-                throw new Error('Invalid price value from Jupiter');
-            }
-
+    
+            logger.debug(`🪐 Getting Jupiter price for ${tokenAddress} via Quote API...`);
+    
+            // 🔥 SKIP BROKEN PRICE API - GO DIRECTLY TO QUOTE API
+            const price = await this.getTokenPriceViaQuote(tokenAddress);
+    
             // Cache the price
             this.priceCache.set(tokenAddress, {
                 price: price,
                 timestamp: now,
-                source: 'Jupiter Price API'
+                source: 'Jupiter Quote API'
             });
-
+    
             this.stats.jupiterPrices++;
             this.stats.priceUpdates++;
-
-            logger.debug(`✅ Jupiter price: ${price.toFixed(12)} SOL`);
+    
+            logger.debug(`✅ Jupiter quote price: ${price.toFixed(12)} SOL`);
             return price;
-
+    
         } catch (error) {
-            logger.debug(`❌ Jupiter price error for ${tokenAddress}: ${error.message}`);
-            
-            // Fallback to Jupiter quote if price API fails
-            try {
-                logger.debug(`🔄 Fallback: Using Jupiter quote for price...`);
-                return await this.getTokenPriceViaQuote(tokenAddress);
-            } catch (fallbackError) {
-                logger.error(`❌ All price methods failed: ${fallbackError.message}`);
-                this.stats.priceFailures++;
-                this.stats.errors++;
-                throw error;
-            }
+            logger.error(`❌ Jupiter price error for ${tokenAddress}: ${error.message}`);
+            this.stats.priceFailures++;
+            this.stats.errors++;
+            throw error;
         }
     }
 
-    // 🪐 NEW: Fallback price method using Jupiter quote
+    // 🪐 Fallback price method using Jupiter quote
     async getTokenPriceViaQuote(tokenAddress) {
         try {
             const testAmount = 1000000; // 0.001 SOL in lamports
@@ -235,15 +197,23 @@ class TradingBot extends EventEmitter {
                 tokenAddress,
                 testAmount
             );
-
-            const tokensReceived = parseFloat(quote.outAmount);
-            const price = (testAmount / 1e9) / (tokensReceived / Math.pow(10, 6)); // Assuming 6 decimals
-
-            logger.debug(`✅ Quote-based price: ${price.toFixed(12)} SOL`);
+    
+            // Handle different token decimals properly
+            let decimals = 6; // Default assumption
+            
+            // For well-known tokens, use correct decimals
+            if (tokenAddress === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v') decimals = 6; // USDC
+            if (tokenAddress === 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB') decimals = 6; // USDT
+            if (tokenAddress === 'So11111111111111111111111111111111111111112') decimals = 9; // SOL
+    
+            const tokensReceived = parseFloat(quote.outAmount) / Math.pow(10, decimals);
+            const price = (testAmount / 1e9) / tokensReceived;
+    
+            logger.debug(`✅ Quote-based price: ${price.toFixed(12)} SOL (${tokensReceived} tokens for 0.001 SOL)`);
             return price;
-
+    
         } catch (error) {
-            throw new Error(`Quote fallback failed: ${error.message}`);
+            throw new Error(`Quote method failed: ${error.message}`);
         }
     }
 
@@ -351,6 +321,36 @@ class TradingBot extends EventEmitter {
         }
     }
 
+    // 🔥 FIXED: Calculate price-based stop loss
+    calculateStopLossPrice(entryPrice) {
+        // Stop loss = entry price * (1 - stop loss percentage / 100)
+        const stopLossPrice = entryPrice * (1 - this.config.stopLossPercentage / 100);
+        
+        logger.debug(`📉 Stop loss: ${entryPrice.toFixed(12)} SOL * (1 - ${this.config.stopLossPercentage}%) = ${stopLossPrice.toFixed(12)} SOL`);
+        
+        return stopLossPrice;
+    }
+
+    // 🔥 FIXED: Calculate price-based take profit levels
+    calculateTakeProfitPrices(entryPrice) {
+        const takeProfitLevels = this.config.takeProfitLevels.map((level, index) => {
+            // Take profit price = entry price * (1 + percentage / 100)
+            const targetPrice = entryPrice * (1 + level.percentage / 100);
+            
+            logger.debug(`📈 TP${index + 1}: ${entryPrice.toFixed(12)} SOL * (1 + ${level.percentage}%) = ${targetPrice.toFixed(12)} SOL (sell ${level.sellPercentage}%)`);
+            
+            return {
+                targetPrice: targetPrice,
+                sellPercentage: level.sellPercentage,
+                percentage: level.percentage,
+                triggered: false,
+                level: index + 1
+            };
+        });
+
+        return takeProfitLevels;
+    }
+
     // 🪐 Execute live buy using Jupiter
     async executeLiveBuy(alert, investmentAmount, currentPrice, expectedTokens) {
         try {
@@ -378,7 +378,11 @@ class TradingBot extends EventEmitter {
             // Execute the swap
             const signature = await this.executeJupiterSwap(quote);
 
-            // Create position with real transaction data
+            // 🔥 FIXED: Calculate price-based stop loss and take profits
+            const stopLossPrice = this.calculateStopLossPrice(actualPrice);
+            const takeProfitPrices = this.calculateTakeProfitPrices(actualPrice);
+
+            // Create position with FIXED price-based triggers
             const position = {
                 id: this.generatePositionId(),
                 tokenAddress: alert.token.address,
@@ -389,8 +393,8 @@ class TradingBot extends EventEmitter {
                 investedAmount: investmentAmount,
                 entryTime: Date.now(),
                 txHash: signature,
-                stopLoss: this.calculateStopLoss(investmentAmount),
-                takeProfitLevels: this.calculateTakeProfitLevels(investmentAmount),
+                stopLossPrice: stopLossPrice, // 🔥 FIXED: Price-based stop loss
+                takeProfitLevels: takeProfitPrices, // 🔥 FIXED: Price-based take profits
                 remainingQuantity: expectedTokensFromJupiter.toString(),
                 alert: alert,
                 paperTrade: false, // 🔥 REAL TRADE
@@ -409,6 +413,8 @@ class TradingBot extends EventEmitter {
             this.stats.liveTradesExecuted++;
 
             logger.info(`🎉 Jupiter buy completed: ${expectedTokensFromJupiter.toFixed(2)} ${alert.token.symbol} @ ${actualPrice.toFixed(12)} SOL`);
+            logger.info(`📉 Stop loss set at: ${stopLossPrice.toFixed(12)} SOL (-${this.config.stopLossPercentage}%)`);
+            logger.info(`📈 Take profits: ${takeProfitPrices.map(tp => `${tp.targetPrice.toFixed(12)} SOL (+${tp.percentage}%)`).join(', ')}`);
             
             this.emit('tradeExecuted', {
                 type: 'JUPITER_BUY',
@@ -418,13 +424,107 @@ class TradingBot extends EventEmitter {
                 investmentAmount: investmentAmount,
                 signature: signature,
                 realTrade: true,
-                executedVia: 'Jupiter'
+                executedVia: 'Jupiter',
+                stopLossPrice: stopLossPrice,
+                takeProfitPrices: takeProfitPrices
             });
 
             return position;
 
         } catch (error) {
             logger.error(`❌ Jupiter buy failed for ${alert.token.symbol}:`, error);
+            this.stats.errors++;
+            throw error;
+        }
+    }
+
+    // Paper trade execution (simulate only) - FIXED
+    async executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens) {
+        // 🔥 FIXED: Calculate price-based stop loss and take profits
+        const stopLossPrice = this.calculateStopLossPrice(currentPrice);
+        const takeProfitPrices = this.calculateTakeProfitPrices(currentPrice);
+
+        const position = {
+            id: this.generatePositionId(),
+            tokenAddress: alert.token.address,
+            symbol: alert.token.symbol,
+            side: 'LONG',
+            entryPrice: currentPrice,
+            quantity: expectedTokens.toString(),
+            investedAmount: investmentAmount,
+            entryTime: Date.now(),
+            txHash: 'PAPER_TRADE_' + Date.now(),
+            stopLossPrice: stopLossPrice, // 🔥 FIXED: Price-based stop loss
+            takeProfitLevels: takeProfitPrices, // 🔥 FIXED: Price-based take profits
+            remainingQuantity: expectedTokens.toString(),
+            alert: alert,
+            paperTrade: true,
+            realPrice: true,
+            executedVia: 'Paper (Jupiter simulation)'
+        };
+
+        if (this.positionManager) {
+            await this.positionManager.addPosition(position);
+        }
+
+        this.stats.tradesExecuted++;
+        this.stats.buyOrders++;
+        this.stats.paperTradesExecuted++;
+
+        logger.info(`📝 Paper buy: ${expectedTokens.toFixed(2)} ${alert.token.symbol} @ ${currentPrice.toFixed(12)} SOL (Jupiter price)`);
+        logger.info(`📉 Stop loss set at: ${stopLossPrice.toFixed(12)} SOL (-${this.config.stopLossPercentage}%)`);
+        logger.info(`📈 Take profits: ${takeProfitPrices.map(tp => `${tp.targetPrice.toFixed(12)} SOL (+${tp.percentage}%)`).join(', ')}`);
+        
+        this.emit('tradeExecuted', {
+            type: 'PAPER_BUY',
+            symbol: alert.token.symbol,
+            amount: expectedTokens.toString(),
+            price: currentPrice,
+            investmentAmount: investmentAmount,
+            signature: position.txHash,
+            realPrice: true,
+            realTrade: false,
+            executedVia: 'Paper (Jupiter simulation)',
+            stopLossPrice: stopLossPrice,
+            takeProfitPrices: takeProfitPrices
+        });
+
+        return position;
+    }
+
+    // Enhanced buy execution with Jupiter integration
+    async executeBuy(alert) {
+        try {
+            const tokenAddress = alert.token.address;
+            const symbol = alert.token.symbol;
+            const investmentAmount = this.calculateInvestmentAmount(alert);
+            
+            logger.info(`💰 Executing BUY: ${investmentAmount} SOL → ${symbol} (${this.config.tradingMode.toUpperCase()} MODE)`);
+
+            // Get REAL current price using Jupiter Price API
+            let currentPrice;
+            try {
+                currentPrice = await this.getTokenPrice(tokenAddress, true);
+                logger.info(`📊 Jupiter price: ${currentPrice.toFixed(12)} SOL per token`);
+            } catch (priceError) {
+                logger.warn(`⚠️ Could not get Jupiter price: ${priceError.message}`);
+                // For Jupiter, we'll get the actual execution price from the quote
+                currentPrice = 0.000001; // Fallback
+            }
+
+            const expectedTokens = investmentAmount / currentPrice;
+            
+            logger.info(`💎 Expected trade: ~${expectedTokens.toFixed(2)} ${symbol} (Jupiter will determine exact amount)`);
+
+            // 🔥 MODE SWITCHING: Execute based on trading mode
+            if (this.config.tradingMode === 'live') {
+                return await this.executeLiveBuy(alert, investmentAmount, currentPrice, expectedTokens);
+            } else {
+                return await this.executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens);
+            }
+
+        } catch (error) {
+            logger.error(`❌ Buy execution failed for ${alert.token.symbol}:`, error);
             this.stats.errors++;
             throw error;
         }
@@ -506,90 +606,6 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    // Enhanced buy execution with Jupiter integration
-    async executeBuy(alert) {
-        try {
-            const tokenAddress = alert.token.address;
-            const symbol = alert.token.symbol;
-            const investmentAmount = this.calculateInvestmentAmount(alert);
-            
-            logger.info(`💰 Executing BUY: ${investmentAmount} SOL → ${symbol} (${this.config.tradingMode.toUpperCase()} MODE)`);
-
-            // Get REAL current price using Jupiter Price API
-            let currentPrice;
-            try {
-                currentPrice = await this.getTokenPrice(tokenAddress, true);
-                logger.info(`📊 Jupiter price: ${currentPrice.toFixed(12)} SOL per token`);
-            } catch (priceError) {
-                logger.warn(`⚠️ Could not get Jupiter price: ${priceError.message}`);
-                // For Jupiter, we'll get the actual execution price from the quote
-                currentPrice = 0.000001; // Fallback
-            }
-
-            const expectedTokens = investmentAmount / currentPrice;
-            
-            logger.info(`💎 Expected trade: ~${expectedTokens.toFixed(2)} ${symbol} (Jupiter will determine exact amount)`);
-
-            // 🔥 MODE SWITCHING: Execute based on trading mode
-            if (this.config.tradingMode === 'live') {
-                return await this.executeLiveBuy(alert, investmentAmount, currentPrice, expectedTokens);
-            } else {
-                return await this.executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens);
-            }
-
-        } catch (error) {
-            logger.error(`❌ Buy execution failed for ${alert.token.symbol}:`, error);
-            this.stats.errors++;
-            throw error;
-        }
-    }
-
-    // Paper trade execution (simulate only)
-    async executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens) {
-        const position = {
-            id: this.generatePositionId(),
-            tokenAddress: alert.token.address,
-            symbol: alert.token.symbol,
-            side: 'LONG',
-            entryPrice: currentPrice,
-            quantity: expectedTokens.toString(),
-            investedAmount: investmentAmount,
-            entryTime: Date.now(),
-            txHash: 'PAPER_TRADE_' + Date.now(),
-            stopLoss: this.calculateStopLoss(investmentAmount),
-            takeProfitLevels: this.calculateTakeProfitLevels(investmentAmount),
-            remainingQuantity: expectedTokens.toString(),
-            alert: alert,
-            paperTrade: true,
-            realPrice: true,
-            executedVia: 'Paper (Jupiter simulation)'
-        };
-
-        if (this.positionManager) {
-            await this.positionManager.addPosition(position);
-        }
-
-        this.stats.tradesExecuted++;
-        this.stats.buyOrders++;
-        this.stats.paperTradesExecuted++;
-
-        logger.info(`📝 Paper buy: ${expectedTokens.toFixed(2)} ${alert.token.symbol} @ ${currentPrice.toFixed(12)} SOL (Jupiter price)`);
-        
-        this.emit('tradeExecuted', {
-            type: 'PAPER_BUY',
-            symbol: alert.token.symbol,
-            amount: expectedTokens.toString(),
-            price: currentPrice,
-            investmentAmount: investmentAmount,
-            signature: position.txHash,
-            realPrice: true,
-            realTrade: false,
-            executedVia: 'Paper (Jupiter simulation)'
-        });
-
-        return position;
-    }
-
     // 🪐 Helper method to sell a position using Jupiter
     async sellPosition(positionId, sellPercentage, reason = 'Triggered') {
         try {
@@ -657,19 +673,6 @@ class TradingBot extends EventEmitter {
         return Math.min(amount, this.config.initialInvestment * 2);
     }
 
-    calculateStopLoss(investedAmount) {
-        return investedAmount * (1 - this.config.stopLossPercentage / 100);
-    }
-
-    calculateTakeProfitLevels(investedAmount) {
-        return this.config.takeProfitLevels.map(level => ({
-            targetValue: investedAmount * (1 + level.percentage / 100),
-            sellPercentage: level.sellPercentage,
-            percentage: level.percentage,
-            triggered: false
-        }));
-    }
-
     generatePositionId() {
         return 'pos_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
@@ -719,7 +722,9 @@ class TradingBot extends EventEmitter {
                 priceSource: 'Jupiter Price API',
                 swapExecution: 'Jupiter Aggregator',
                 slippageTolerance: this.config.slippageTolerance + '%',
-                priceCacheTimeout: this.priceCacheTimeout + 'ms'
+                priceCacheTimeout: this.priceCacheTimeout + 'ms',
+                stopLossPercentage: this.config.stopLossPercentage + '%',
+                takeProfitLevels: this.config.takeProfitLevels.map(tp => `+${tp.percentage}% (sell ${tp.sellPercentage}%)`).join(', ')
             },
             pricing: {
                 jupiterPricesObtained: this.stats.jupiterPrices,

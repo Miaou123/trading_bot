@@ -1,4 +1,4 @@
-// src/services/tradingWebSocket.js - Updated with IPFS metadata support
+// src/services/tradingWebSocket.js - FIXED migration detection + enhanced logging
 const WebSocket = require('ws');
 const EventEmitter = require('events');
 const axios = require('axios');
@@ -10,6 +10,7 @@ class TradingWebSocket extends EventEmitter {
         this.ws = null;
         this.isConnected = false;
         this.minLikes = config.minLikes || parseInt(process.env.MIN_TWITTER_LIKES) || 100;
+        this.connectionId = Math.random().toString(36).substring(7);
         
         this.httpClient = axios.create({
             timeout: 5000, // 5 second timeout for IPFS
@@ -22,84 +23,127 @@ class TradingWebSocket extends EventEmitter {
 
         // IPFS metadata cache to avoid repeated fetches
         this.metadataCache = new Map();
+        
+        // Track message stats
+        this.messageStats = {
+            received: 0,
+            processed: 0,
+            creations: 0,
+            migrations: 0,
+            qualified: 0,
+            skipped: 0,
+            errors: 0
+        };
+        
+        // Clean up cache periodically
+        setInterval(() => this.cleanupCache(), 60000); // Every minute
     }
 
     connect() {
+        logger.info(`[${this.connectionId}] Connecting to PumpPortal for trading signals...`);
         this.ws = new WebSocket('wss://pumpportal.fun/api/data');
         
         this.ws.on('open', () => {
-            logger.info('🔗 Connected to PumpPortal');
+            logger.info(`[${this.connectionId}] 🔗 Connected to PumpPortal`);
             this.isConnected = true;
             
             // Subscribe to both creation and migration events
             this.ws.send(JSON.stringify({ method: 'subscribeNewToken' }));
             this.ws.send(JSON.stringify({ method: 'subscribeMigration' }));
             
-            logger.info('✅ Subscribed to creation and migration events');
+            logger.info(`[${this.connectionId}] ✅ Subscribed to creation and migration events`);
+            logger.info(`[${this.connectionId}] 📊 Minimum likes threshold: ${this.minLikes}`);
         });
 
         this.ws.on('message', async (data) => {
+            this.messageStats.received++;
+            
             try {
                 const message = JSON.parse(data.toString());
                 
                 // Skip subscription confirmations
                 if (message.message && message.message.includes('Successfully subscribed')) {
-                    logger.info(`✅ ${message.message}`);
+                    logger.info(`[${this.connectionId}] ✅ ${message.message}`);
                     return;
                 }
                 
-                // Handle creation events
+                // 🚀 FIXED: Handle creation events
                 if (message.txType === 'create' && message.mint) {
-                    logger.info(`🪙 New token: ${message.symbol} - ${message.mint}`);
+                    this.messageStats.creations++;
+                    logger.info(`[${this.connectionId}] 🪙 New token: ${message.symbol} - ${message.mint}`);
                     await this.processToken(message, 'creation');
                 }
-                // Handle migration events  
-                else if (message.txType === 'migration' && message.mint) {
-                    logger.info(`🔄 Migration: ${message.mint}`);
+                // 🚀 FIXED: Handle migration events (correct txType)
+                else if (message.txType === 'migrate' && message.mint) {
+                    this.messageStats.migrations++;
+                    logger.info(`[${this.connectionId}] 🔄 Migration: ${message.mint} (pool: ${message.pool || 'unknown'})`);
                     await this.processToken(message, 'migration');
                 }
-                // Log unknown events
+                // 🚀 ADDED: Handle legacy migration format (just in case)
+                else if (message.txType === 'migration' && message.mint) {
+                    this.messageStats.migrations++;
+                    logger.info(`[${this.connectionId}] 🔄 Migration (legacy): ${message.mint}`);
+                    await this.processToken(message, 'migration');
+                }
+                // Log unknown events for debugging
                 else if (message.mint) {
-                    logger.debug(`❓ Unknown event: ${message.txType || 'NO_TYPE'} for ${message.mint}`);
+                    logger.debug(`[${this.connectionId}] ❓ Unknown event: ${message.txType || 'NO_TYPE'} for ${message.mint}`);
                 }
                 
             } catch (error) {
-                logger.error('WebSocket parse error:', error);
+                this.messageStats.errors++;
+                logger.error(`[${this.connectionId}] WebSocket parse error:`, error);
             }
         });
 
-        this.ws.on('close', () => {
-            logger.warn('WebSocket closed, reconnecting...');
+        this.ws.on('error', (error) => {
+            logger.error(`[${this.connectionId}] WebSocket error:`, error);
+        });
+
+        this.ws.on('close', (code, reason) => {
+            logger.warn(`[${this.connectionId}] WebSocket closed (${code}: ${reason}), reconnecting in 5s...`);
             this.isConnected = false;
             setTimeout(() => this.connect(), 5000);
         });
     }
 
     async processToken(tokenData, eventType = 'creation') {
+        this.messageStats.processed++;
+        
         try {
             const tokenSymbol = tokenData.symbol || tokenData.mint?.substring(0, 8) || 'UNKNOWN';
+            const processingStart = Date.now();
+            
+            logger.info(`[${this.connectionId}] 🔍 PROCESSING: ${tokenSymbol} (${eventType})`);
             
             // Extract Twitter URL with IPFS fallback
             const twitterUrl = await this.extractTwitterUrlWithIPFS(tokenData);
             if (!twitterUrl) {
-                logger.info(`⏭️ SKIPPED: ${tokenSymbol} (${eventType}) - No Twitter URL found`);
+                this.messageStats.skipped++;
+                logger.info(`[${this.connectionId}] ⏭️ SKIPPED: ${tokenSymbol} (${eventType}) - No Twitter URL found`);
                 return;
             }
 
-            logger.info(`🐦 CHECKING: ${tokenSymbol} (${eventType}) - Twitter: ${twitterUrl}`);
+            logger.info(`[${this.connectionId}] 🐦 CHECKING: ${tokenSymbol} (${eventType}) - Twitter: ${twitterUrl}`);
 
             // Check likes
+            const likesStart = Date.now();
             const likes = await this.checkLikes(twitterUrl);
+            const likesTime = Date.now() - likesStart;
             
             if (!likes || likes < this.minLikes) {
-                logger.info(`⏭️ SKIPPED: ${tokenSymbol} (${eventType}) - ${likes} likes < ${this.minLikes} required`);
+                this.messageStats.skipped++;
+                logger.info(`[${this.connectionId}] ⏭️ SKIPPED: ${tokenSymbol} (${eventType}) - ${likes} likes < ${this.minLikes} required (${likesTime}ms)`);
                 return;
             }
 
-            // Qualified - emit for trading
-            logger.info(`✅ QUALIFIED: ${tokenSymbol} (${eventType}) - ${likes} likes ≥ ${this.minLikes} required`);
+            // 🚀 QUALIFIED - emit for trading
+            this.messageStats.qualified++;
+            const totalTime = Date.now() - processingStart;
             
-            this.emit('qualifiedToken', {
+            logger.info(`[${this.connectionId}] ✅ QUALIFIED: ${tokenSymbol} (${eventType}) - ${likes} likes ≥ ${this.minLikes} required (${totalTime}ms total)`);
+            
+            const qualifiedData = {
                 eventType: eventType,
                 token: {
                     address: tokenData.mint,
@@ -109,33 +153,46 @@ class TradingWebSocket extends EventEmitter {
                 twitter: {
                     likes: likes,
                     url: twitterUrl
+                },
+                // 🚀 ADDED: Include migration-specific data
+                migration: eventType === 'migration' ? {
+                    pool: tokenData.pool || 'unknown',
+                    signature: tokenData.signature
+                } : undefined,
+                // 🚀 ADDED: Performance metrics
+                performance: {
+                    processingTime: totalTime,
+                    likesCheckTime: likesTime
                 }
-            });
+            };
+            
+            this.emit('qualifiedToken', qualifiedData);
 
         } catch (error) {
-            logger.error(`❌ Error processing ${tokenData.symbol || tokenData.mint}:`, error);
+            this.messageStats.errors++;
+            logger.error(`[${this.connectionId}] ❌ Error processing ${tokenData.symbol || tokenData.mint}:`, error);
         }
     }
 
-    // 🔥 NEW: Extract Twitter URL with IPFS metadata fallback
+    // 🔥 Enhanced: Extract Twitter URL with IPFS metadata fallback + better logging
     async extractTwitterUrlWithIPFS(tokenData) {
         const tokenAddress = tokenData.mint;
         
         // Step 1: Check direct fields in WebSocket message
         const directUrl = this.extractDirectTwitterUrl(tokenData);
         if (directUrl) {
-            logger.debug(`✅ Twitter URL found in WebSocket message`);
+            logger.debug(`[${this.connectionId}] ✅ Twitter URL found in WebSocket message: ${directUrl}`);
             return directUrl;
         }
 
         // Step 2: Fetch IPFS metadata if available
         const ipfsUrl = await this.fetchIPFSMetadata(tokenAddress, tokenData.uri);
         if (ipfsUrl) {
-            logger.debug(`✅ Twitter URL found in IPFS metadata`);
+            logger.debug(`[${this.connectionId}] ✅ Twitter URL found in IPFS metadata: ${ipfsUrl}`);
             return ipfsUrl;
         }
 
-        logger.debug(`❌ No Twitter URL found anywhere for ${tokenAddress}`);
+        logger.debug(`[${this.connectionId}] ❌ No Twitter URL found anywhere for ${tokenAddress}`);
         return null;
     }
 
@@ -146,20 +203,23 @@ class TradingWebSocket extends EventEmitter {
         for (const field of fieldsToCheck) {
             if (tokenData[field]) {
                 const url = this.findTwitterStatusUrl(tokenData[field]);
-                if (url) return url;
+                if (url) {
+                    logger.debug(`[${this.connectionId}] Found Twitter URL in field '${field}': ${url}`);
+                    return url;
+                }
             }
         }
         
         return null;
     }
 
-    // 🔥 NEW: Fetch IPFS metadata and extract Twitter URL
+    // 🔥 Enhanced: Fetch IPFS metadata and extract Twitter URL with better error handling
     async fetchIPFSMetadata(tokenAddress, uriFromMessage = null) {
         try {
             // Check cache first
             if (this.metadataCache.has(tokenAddress)) {
                 const cached = this.metadataCache.get(tokenAddress);
-                logger.debug(`📁 Using cached metadata for ${tokenAddress}`);
+                logger.debug(`[${this.connectionId}] 📁 Using cached metadata for ${tokenAddress}`);
                 return cached.twitterUrl;
             }
 
@@ -171,11 +231,18 @@ class TradingWebSocket extends EventEmitter {
             }
             
             if (!metadataUri) {
-                logger.debug(`❌ No metadata URI found for ${tokenAddress}`);
+                logger.debug(`[${this.connectionId}] ❌ No metadata URI found for ${tokenAddress}`);
                 return null;
             }
 
-            logger.debug(`📁 Fetching IPFS metadata: ${metadataUri}`);
+            // Convert IPFS URIs to HTTP
+            if (metadataUri.startsWith('ipfs://')) {
+                metadataUri = metadataUri.replace('ipfs://', 'https://ipfs.io/ipfs/');
+            } else if (metadataUri.startsWith('ar://')) {
+                metadataUri = metadataUri.replace('ar://', 'https://arweave.net/');
+            }
+
+            logger.debug(`[${this.connectionId}] 📁 Fetching IPFS metadata: ${metadataUri}`);
             
             // Fetch metadata from IPFS
             const response = await this.httpClient.get(metadataUri);
@@ -184,17 +251,24 @@ class TradingWebSocket extends EventEmitter {
             // Extract Twitter URL from metadata
             const twitterUrl = this.extractTwitterFromMetadata(metadata);
             
-            // Cache result (even if null)
+            // Cache result (even if null) - cache for 5 minutes
             this.metadataCache.set(tokenAddress, {
                 metadata: metadata,
                 twitterUrl: twitterUrl,
                 timestamp: Date.now()
             });
             
+            logger.debug(`[${this.connectionId}] 📁 Metadata cached for ${tokenAddress}, Twitter URL: ${twitterUrl || 'not found'}`);
             return twitterUrl;
             
         } catch (error) {
-            logger.debug(`❌ IPFS metadata fetch failed for ${tokenAddress}: ${error.message}`);
+            logger.debug(`[${this.connectionId}] ❌ IPFS metadata fetch failed for ${tokenAddress}: ${error.message}`);
+            // Cache negative result to avoid repeated failures
+            this.metadataCache.set(tokenAddress, {
+                metadata: null,
+                twitterUrl: null,
+                timestamp: Date.now()
+            });
             return null;
         }
     }
@@ -203,6 +277,7 @@ class TradingWebSocket extends EventEmitter {
     async getMetadataURI(tokenAddress) {
         try {
             if (!process.env.HELIUS_RPC_URL) {
+                logger.debug(`[${this.connectionId}] ❌ No HELIUS_RPC_URL configured`);
                 return null;
             }
             
@@ -214,11 +289,11 @@ class TradingWebSocket extends EventEmitter {
             });
             
             const uri = response.data?.result?.content?.json_uri;
-            logger.debug(`📁 Metadata URI from Helius: ${uri}`);
+            logger.debug(`[${this.connectionId}] 📁 Metadata URI from Helius: ${uri || 'not found'}`);
             return uri;
             
         } catch (error) {
-            logger.debug(`❌ Helius metadata URI fetch failed: ${error.message}`);
+            logger.debug(`[${this.connectionId}] ❌ Helius metadata URI fetch failed: ${error.message}`);
             return null;
         }
     }
@@ -243,7 +318,10 @@ class TradingWebSocket extends EventEmitter {
             const value = this.getNestedValue(metadata, field);
             if (value) {
                 const url = this.findTwitterStatusUrl(value);
-                if (url) return url;
+                if (url) {
+                    logger.debug(`[${this.connectionId}] Found Twitter URL in metadata field '${field}': ${url}`);
+                    return url;
+                }
             }
         }
         
@@ -252,7 +330,10 @@ class TradingWebSocket extends EventEmitter {
             for (const attr of metadata.attributes) {
                 if (attr.trait_type && attr.trait_type.toLowerCase().includes('twitter') && attr.value) {
                     const url = this.findTwitterStatusUrl(attr.value);
-                    if (url) return url;
+                    if (url) {
+                        logger.debug(`[${this.connectionId}] Found Twitter URL in metadata attribute '${attr.trait_type}': ${url}`);
+                        return url;
+                    }
                 }
             }
         }
@@ -291,7 +372,7 @@ class TradingWebSocket extends EventEmitter {
             return likes;
 
         } catch (error) {
-            logger.debug(`Twitter check failed: ${error.message}`);
+            logger.debug(`[${this.connectionId}] Twitter check failed: ${error.message}`);
             return 0;
         }
     }
@@ -301,19 +382,46 @@ class TradingWebSocket extends EventEmitter {
         return match ? match[1] : null;
     }
 
-    // Clean up cache periodically
+    // 🚀 Enhanced: Clean up cache periodically with better logging
     cleanupCache() {
         const now = Date.now();
         const maxAge = 300000; // 5 minutes
+        const sizeBefore = this.metadataCache.size;
         
         for (const [key, value] of this.metadataCache.entries()) {
             if (now - value.timestamp > maxAge) {
                 this.metadataCache.delete(key);
             }
         }
+        
+        const sizeAfter = this.metadataCache.size;
+        if (sizeBefore > sizeAfter) {
+            logger.debug(`[${this.connectionId}] 🧹 Cache cleanup: ${sizeBefore} → ${sizeAfter} entries`);
+        }
+    }
+
+    // 🚀 NEW: Get comprehensive stats
+    getStats() {
+        return {
+            connectionId: this.connectionId,
+            isConnected: this.isConnected,
+            messageStats: this.messageStats,
+            cacheSize: this.metadataCache.size,
+            minLikes: this.minLikes,
+            qualificationRate: this.messageStats.processed > 0 ? 
+                (this.messageStats.qualified / this.messageStats.processed * 100).toFixed(1) + '%' : '0%'
+        };
+    }
+
+    // 🚀 NEW: Get stats string for logging
+    getStatsString() {
+        const stats = this.getStats();
+        return `📊 Trading Bot Stats: ${stats.messageStats.received} received | ${stats.messageStats.processed} processed | ${stats.messageStats.creations} creations | ${stats.messageStats.migrations} migrations | ${stats.messageStats.qualified} qualified | ${stats.messageStats.skipped} skipped | ${stats.messageStats.errors} errors | Qualification rate: ${stats.qualificationRate}`;
     }
 
     disconnect() {
+        logger.info(`[${this.connectionId}] Disconnecting trading WebSocket...`);
+        
         if (this.ws) {
             this.ws.close();
             this.isConnected = false;
@@ -321,6 +429,9 @@ class TradingWebSocket extends EventEmitter {
         
         // Clean up cache
         this.metadataCache.clear();
+        
+        // Log final stats
+        logger.info(`[${this.connectionId}] Final stats: ${this.getStatsString()}`);
     }
 }
 
