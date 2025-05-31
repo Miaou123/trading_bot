@@ -1,20 +1,25 @@
-// src/bot/riskManager.js - Risk Management System
+// src/bot/riskManager.js - Fixed Risk Management System with proper config
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
+const { riskConfig, filtersConfig } = require('../config/tradingConfig');
 
 class RiskManager extends EventEmitter {
     constructor(config = {}) {
         super();
         
+        // 🔥 FIXED: Use proper configuration from config file
         this.config = {
-            maxConcurrentPositions: config.maxConcurrentPositions || 5,
-            maxDailyLosses: config.maxDailyLosses || 1.0, // SOL
-            maxSinglePositionSize: config.maxSinglePositionSize || 0.5, // SOL
-            blacklistBundleDetected: config.blacklistBundleDetected !== false,
-            blacklistHighRisk: config.blacklistHighRisk !== false,
-            minLiquidity: config.minLiquidity || 10, // SOL
-            maxPositionAge: config.maxPositionAge || 24 * 60 * 60 * 1000, // 24 hours
-            emergencyStopLoss: config.emergencyStopLoss || 80, // 80% loss triggers emergency stop
+            // Use config file values with fallbacks
+            maxConcurrentPositions: config.maxConcurrentPositions || riskConfig.maxConcurrentPositions,
+            maxDailyLosses: config.maxDailyLosses || riskConfig.maxDailyLosses,
+            maxSinglePositionSize: config.maxSinglePositionSize || riskConfig.maxSinglePositionSize,
+            blacklistBundleDetected: config.blacklistBundleDetected !== undefined ? 
+                config.blacklistBundleDetected : riskConfig.blacklistBundleDetected,
+            blacklistHighRisk: config.blacklistHighRisk !== undefined ? 
+                config.blacklistHighRisk : riskConfig.blacklistHighRisk,
+            minLiquidity: config.minLiquidity || riskConfig.minLiquidity,
+            maxPositionAge: config.maxPositionAge || riskConfig.maxPositionAge,
+            emergencyStopLoss: config.emergencyStopLoss || riskConfig.emergencyStopLoss,
             ...config
         };
 
@@ -46,6 +51,8 @@ class RiskManager extends EventEmitter {
         logger.info(`   • Blacklist Bundle Detected: ${this.config.blacklistBundleDetected}`);
         logger.info(`   • Blacklist High Risk: ${this.config.blacklistHighRisk}`);
         logger.info(`   • Emergency Stop Loss: ${this.config.emergencyStopLoss}%`);
+        logger.info(`   • Min Liquidity: ${this.config.minLiquidity} SOL`);
+        logger.info(`   • Max Position Age: ${this.config.maxPositionAge / (1000 * 60 * 60)} hours`);
     }
 
     async checkAlert(alert) {
@@ -145,7 +152,6 @@ class RiskManager extends EventEmitter {
 
     checkPositionLimit() {
         // This would be checked against actual position manager
-        // For now, we'll assume it's injected or available
         const currentPositions = this.getCurrentPositionCount();
         
         if (currentPositions >= this.config.maxConcurrentPositions) {
@@ -201,6 +207,23 @@ class RiskManager extends EventEmitter {
     }
 
     checkEngagementRisk(twitter) {
+        // Use filter config for minimum engagement
+        if (twitter.likes < filtersConfig.minTwitterLikes) {
+            return {
+                approved: false,
+                reason: `Insufficient Twitter likes: ${twitter.likes} < ${filtersConfig.minTwitterLikes}`,
+                riskLevel: 'LOW'
+            };
+        }
+
+        if (twitter.views && twitter.views < filtersConfig.minTwitterViews) {
+            return {
+                approved: false,
+                reason: `Insufficient Twitter views: ${twitter.views} < ${filtersConfig.minTwitterViews}`,
+                riskLevel: 'LOW'
+            };
+        }
+
         // Suspicious engagement patterns
         if (twitter.likes > 0 && twitter.views > 0) {
             const engagementRatio = twitter.likes / twitter.views;
@@ -220,9 +243,9 @@ class RiskManager extends EventEmitter {
     }
 
     checkPositionSize(alert) {
-        // Calculate intended position size
-        const baseSize = parseFloat(process.env.INITIAL_INVESTMENT_SOL) || 0.1;
-        let intendedSize = baseSize;
+        // Calculate intended position size using config
+        const baseSize = riskConfig.maxSinglePositionSize;
+        let intendedSize = Math.min(baseSize, this.config.maxSinglePositionSize);
 
         // Adjust for confidence
         switch (alert.confidence) {
@@ -447,7 +470,9 @@ class RiskManager extends EventEmitter {
                 maxConcurrentPositions: this.config.maxConcurrentPositions,
                 maxDailyLosses: this.config.maxDailyLosses,
                 maxSinglePositionSize: this.config.maxSinglePositionSize,
-                emergencyStopLoss: this.config.emergencyStopLoss
+                emergencyStopLoss: this.config.emergencyStopLoss,
+                blacklistBundleDetected: this.config.blacklistBundleDetected,
+                blacklistHighRisk: this.config.blacklistHighRisk
             }
         };
     }

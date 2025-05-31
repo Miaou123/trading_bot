@@ -12,16 +12,20 @@
     "live": "TRADING_MODE=live node src/app.js"
   },
   "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
     "@pump-fun/pump-swap-sdk": "^0.0.1-beta.36",
-    "@solana/web3.js": "^1.87.6",
-    "@solana/spl-token": "^0.3.9",
-    "node-telegram-bot-api": "^0.66.0",
-    "dotenv": "^16.4.5",
-    "winston": "^3.17.0",
-    "axios": "^1.7.7",
-    "big.js": "^6.2.1",
+    "@solana/spl-token": "^0.3.11",
+    "@solana/web3.js": "^1.98.2",
+    "axios": "^1.9.0",
+    "big.js": "^6.2.2",
+    "bs58": "^6.0.0",
+    "dotenv": "^16.5.0",
+    "express": "^4.18.2",
     "lodash": "^4.17.21",
-    "uuid": "^10.0.0"
+    "node-telegram-bot-api": "^0.66.0",
+    "path-to-regexp": "^6.2.1",
+    "uuid": "^10.0.0",
+    "winston": "^3.17.0"
   },
   "devDependencies": {
     "jest": "^29.7.0",

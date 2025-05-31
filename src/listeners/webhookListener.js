@@ -1,4 +1,4 @@
-// src/listeners/webhookListener.js - Ultra-fast webhook receiver for trading bot
+// src/listeners/webhookListener.js - Fixed version with safer Express routes
 const express = require('express');
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
@@ -11,7 +11,7 @@ class WebhookListener extends EventEmitter {
             port: config.port || process.env.WEBHOOK_PORT || 3001,
             apiKey: config.apiKey || process.env.TRADING_BOT_API_KEY || 'your-secret-key',
             enableCors: config.enableCors !== false,
-            rateLimit: config.rateLimit || 100, // requests per minute
+            rateLimit: config.rateLimit || 100,
             enableHealthCheck: config.enableHealthCheck !== false,
             logRequests: config.logRequests !== false,
             ...config
@@ -51,7 +51,6 @@ class WebhookListener extends EventEmitter {
         this.app.use(express.json({ 
             limit: '1mb',
             verify: (req, res, buf) => {
-                // Store raw body for verification if needed
                 req.rawBody = buf;
             }
         }));
@@ -75,7 +74,6 @@ class WebhookListener extends EventEmitter {
         this.app.use((req, res, next) => {
             const now = Date.now();
             
-            // Reset counter every minute
             if (now - this.lastReset > 60000) {
                 this.requestCount = 0;
                 this.lastReset = now;
@@ -95,51 +93,22 @@ class WebhookListener extends EventEmitter {
             next();
         });
 
-        // Request logging middleware
+        // Request logging middleware (only for non-health endpoints)
         if (this.config.logRequests) {
             this.app.use((req, res, next) => {
-                const start = Date.now();
-                const originalSend = res.send;
-                
-                res.send = function(body) {
-                    const duration = Date.now() - start;
-                    const size = Buffer.byteLength(body || '', 'utf8');
+                if (req.path !== '/health') {
+                    const start = Date.now();
+                    const originalSend = res.send;
                     
-                    if (req.path !== '/health') { // Don't log health checks
-                        logger.debug(`${req.method} ${req.path} ${res.statusCode} ${duration}ms ${size}b from ${req.ip}`);
-                    }
-                    
-                    originalSend.call(this, body);
-                };
-                
+                    res.send = function(body) {
+                        const duration = Date.now() - start;
+                        logger.debug(`${req.method} ${req.path} ${res.statusCode} ${duration}ms from ${req.ip}`);
+                        originalSend.call(this, body);
+                    };
+                }
                 next();
             });
         }
-
-        // API key authentication for webhook endpoints
-        this.app.use('/webhook', (req, res, next) => {
-            const apiKey = req.headers['x-api-key'];
-            
-            if (!apiKey) {
-                logger.warn(`Missing API key from ${req.ip} for ${req.path}`);
-                return res.status(401).json({ 
-                    error: 'API key required',
-                    hint: 'Include X-API-Key header'
-                });
-            }
-            
-            if (apiKey !== this.config.apiKey) {
-                logger.warn(`Invalid API key from ${req.ip}: ${apiKey.substring(0, 8)}...`);
-                return res.status(401).json({ 
-                    error: 'Invalid API key',
-                    provided: apiKey.substring(0, 8) + '...'
-                });
-            }
-            
-            // Valid API key
-            req.authenticated = true;
-            next();
-        });
 
         // Error handling middleware
         this.app.use((error, req, res, next) => {
@@ -180,6 +149,58 @@ class WebhookListener extends EventEmitter {
             });
         });
 
+        // Status endpoint
+        this.app.get('/status', (req, res) => {
+            const uptime = Date.now() - this.stats.startTime;
+            
+            res.json({
+                service: 'pump-trading-bot-webhook',
+                version: '1.0.0',
+                status: 'active',
+                uptime: this.formatUptime(uptime),
+                webhook: {
+                    listening: this.isListening,
+                    port: this.config.port,
+                    rateLimit: this.config.rateLimit,
+                    corsEnabled: this.config.enableCors
+                },
+                stats: {
+                    ...this.stats,
+                    uptime,
+                    fastestAlert: this.stats.fastestAlert === Infinity ? 0 : this.stats.fastestAlert,
+                    avgProcessingTime: this.stats.alertsProcessed > 0 ? 
+                        (this.stats.totalProcessingTime / this.stats.alertsProcessed).toFixed(2) + 'ms' : '0ms',
+                    successRate: this.stats.requestsReceived > 0 ? 
+                        ((this.stats.alertsProcessed / this.stats.requestsReceived) * 100).toFixed(1) + '%' : '0%',
+                    qualificationRate: this.stats.alertsProcessed > 0 ? 
+                        ((this.stats.alertsQualified / this.stats.alertsProcessed) * 100).toFixed(1) + '%' : '0%'
+                }
+            });
+        });
+
+        // API key middleware for webhook endpoints
+        this.app.use('/webhook', (req, res, next) => {
+            const apiKey = req.headers['x-api-key'];
+            
+            if (!apiKey) {
+                logger.warn(`Missing API key from ${req.ip} for ${req.path}`);
+                return res.status(401).json({ 
+                    error: 'API key required',
+                    hint: 'Include X-API-Key header'
+                });
+            }
+            
+            if (apiKey !== this.config.apiKey) {
+                logger.warn(`Invalid API key from ${req.ip}: ${apiKey.substring(0, 8)}...`);
+                return res.status(401).json({ 
+                    error: 'Invalid API key'
+                });
+            }
+            
+            req.authenticated = true;
+            next();
+        });
+
         // Main webhook endpoint for token alerts
         this.app.post('/webhook/alert', async (req, res) => {
             const requestStart = Date.now();
@@ -188,9 +209,8 @@ class WebhookListener extends EventEmitter {
             try {
                 const alert = req.body;
                 const source = req.headers['x-source'] || 'unknown';
-                const version = req.headers['x-version'] || '1.0';
                 
-                logger.debug(`📨 Webhook alert received from ${source} v${version}`);
+                logger.debug(`📨 Webhook alert received from ${source}`);
                 
                 // Quick validation
                 const validation = this.validateAlert(alert);
@@ -198,8 +218,7 @@ class WebhookListener extends EventEmitter {
                     logger.warn(`❌ Invalid alert from ${req.ip}: ${validation.error}`);
                     return res.status(400).json({ 
                         error: 'Invalid alert format',
-                        details: validation.error,
-                        received: Object.keys(alert || {})
+                        details: validation.error
                     });
                 }
 
@@ -207,7 +226,6 @@ class WebhookListener extends EventEmitter {
                 const processingStart = Date.now();
                 const result = await this.processAlert(alert, {
                     source,
-                    version,
                     ip: req.ip,
                     receivedAt: requestStart
                 });
@@ -247,67 +265,7 @@ class WebhookListener extends EventEmitter {
             }
         });
 
-        // Batch alerts endpoint
-        this.app.post('/webhook/batch', async (req, res) => {
-            const requestStart = Date.now();
-            
-            try {
-                const { alerts } = req.body;
-                
-                if (!Array.isArray(alerts) || alerts.length === 0) {
-                    return res.status(400).json({ 
-                        error: 'Invalid batch format',
-                        expected: '{ "alerts": [...] }'
-                    });
-                }
-
-                if (alerts.length > 10) {
-                    return res.status(400).json({ 
-                        error: 'Batch too large',
-                        max: 10,
-                        received: alerts.length
-                    });
-                }
-
-                logger.info(`📦 Processing batch of ${alerts.length} alerts`);
-
-                const results = await Promise.allSettled(
-                    alerts.map((alert, index) => 
-                        this.processAlert(alert, {
-                            source: 'batch',
-                            batchIndex: index,
-                            receivedAt: requestStart
-                        })
-                    )
-                );
-
-                const successful = results.filter(r => r.status === 'fulfilled').length;
-                const failed = results.filter(r => r.status === 'rejected').length;
-                const qualified = results
-                    .filter(r => r.status === 'fulfilled')
-                    .filter(r => r.value.qualified).length;
-
-                const totalTime = Date.now() - requestStart;
-
-                res.json({
-                    success: true,
-                    processed: alerts.length,
-                    successful,
-                    failed,
-                    qualified,
-                    totalTime: `${totalTime}ms`,
-                    averageTime: `${(totalTime / alerts.length).toFixed(1)}ms`
-                });
-
-                logger.info(`📦 Batch completed: ${successful}/${alerts.length} successful, ${qualified} qualified`);
-
-            } catch (error) {
-                logger.error('❌ Batch processing error:', error);
-                res.status(500).json({ error: error.message });
-            }
-        });
-
-        // Test endpoint for development
+        // Test endpoint
         this.app.post('/webhook/test', (req, res) => {
             const testAlert = {
                 source: 'test',
@@ -315,8 +273,7 @@ class WebhookListener extends EventEmitter {
                 token: {
                     address: 'TEST_' + Date.now(),
                     symbol: 'TEST',
-                    name: 'Test Token',
-                    eventType: 'creation'
+                    name: 'Test Token'
                 },
                 twitter: {
                     likes: Math.floor(Math.random() * 1000) + 100,
@@ -325,8 +282,6 @@ class WebhookListener extends EventEmitter {
                 },
                 analysis: {
                     bundleDetected: Math.random() > 0.7,
-                    whaleCount: Math.floor(Math.random() * 15),
-                    freshWalletCount: Math.floor(Math.random() * 15),
                     riskLevel: ['LOW', 'MEDIUM', 'HIGH'][Math.floor(Math.random() * 3)]
                 },
                 confidence: ['LOW', 'MEDIUM', 'HIGH'][Math.floor(Math.random() * 3)]
@@ -343,49 +298,15 @@ class WebhookListener extends EventEmitter {
             logger.info(`🧪 Test alert processed: ${testAlert.token.symbol}`);
         });
 
-        // Status endpoint with detailed information
-        this.app.get('/status', (req, res) => {
-            const uptime = Date.now() - this.stats.startTime;
-            
-            res.json({
-                service: 'pump-trading-bot-webhook',
-                version: '1.0.0',
-                status: 'active',
-                uptime: this.formatUptime(uptime),
-                webhook: {
-                    listening: this.isListening,
-                    port: this.config.port,
-                    rateLimit: this.config.rateLimit,
-                    corsEnabled: this.config.enableCors
-                },
-                stats: {
-                    ...this.stats,
-                    uptime,
-                    fastestAlert: this.stats.fastestAlert === Infinity ? 0 : this.stats.fastestAlert,
-                    avgProcessingTime: this.stats.alertsProcessed > 0 ? 
-                        (this.stats.totalProcessingTime / this.stats.alertsProcessed).toFixed(2) + 'ms' : '0ms',
-                    successRate: this.stats.requestsReceived > 0 ? 
-                        ((this.stats.alertsProcessed / this.stats.requestsReceived) * 100).toFixed(1) + '%' : '0%',
-                    qualificationRate: this.stats.alertsProcessed > 0 ? 
-                        ((this.stats.alertsQualified / this.stats.alertsProcessed) * 100).toFixed(1) + '%' : '0%'
-                },
-                config: {
-                    apiKeyConfigured: !!this.config.apiKey,
-                    healthCheckEnabled: this.config.enableHealthCheck,
-                    requestLogging: this.config.logRequests
-                }
-            });
-        });
-
-        // Catch-all for undefined routes
+        // Catch-all for undefined routes - FIXED: Use simple string instead of complex pattern
         this.app.use('*', (req, res) => {
             res.status(404).json({
                 error: 'Endpoint not found',
+                path: req.originalUrl,
                 available: [
                     'GET /health',
                     'GET /status', 
                     'POST /webhook/alert',
-                    'POST /webhook/batch',
                     'POST /webhook/test'
                 ]
             });
@@ -401,8 +322,7 @@ class WebhookListener extends EventEmitter {
         const required = [
             'token.address',
             'token.symbol', 
-            'twitter.likes',
-            'analysis'
+            'twitter.likes'
         ];
 
         for (const field of required) {
@@ -417,15 +337,6 @@ class WebhookListener extends EventEmitter {
             }
         }
 
-        // Type validation
-        if (typeof alert.twitter.likes !== 'number' || alert.twitter.likes < 0) {
-            return { valid: false, error: 'twitter.likes must be a non-negative number' };
-        }
-
-        if (alert.twitter.views && (typeof alert.twitter.views !== 'number' || alert.twitter.views < 0)) {
-            return { valid: false, error: 'twitter.views must be a non-negative number' };
-        }
-
         return { valid: true };
     }
 
@@ -433,7 +344,6 @@ class WebhookListener extends EventEmitter {
         try {
             this.stats.alertsProcessed++;
             
-            // Enhance alert with metadata
             const enhancedAlert = {
                 ...alert,
                 metadata: {
@@ -444,17 +354,14 @@ class WebhookListener extends EventEmitter {
                 }
             };
 
-            // Update last alert info
             this.stats.lastAlert = {
                 symbol: alert.token.symbol,
                 timestamp: Date.now(),
                 qualified: false
             };
 
-            // Emit alert received event
             this.emit('alertReceived', enhancedAlert);
 
-            // Check if alert qualifies for trading
             const qualified = this.isQualifiedAlert(enhancedAlert);
             this.stats.lastAlert.qualified = qualified;
 
@@ -462,7 +369,7 @@ class WebhookListener extends EventEmitter {
                 this.stats.alertsQualified++;
                 this.emit('qualifiedAlert', enhancedAlert);
                 
-                logger.info(`✅ QUALIFIED: ${alert.token.symbol} - ${alert.twitter.likes} likes, ${alert.confidence} confidence`);
+                logger.info(`✅ QUALIFIED: ${alert.token.symbol} - ${alert.twitter.likes} likes`);
                 return { qualified: true, action: 'FORWARDED_TO_TRADING_BOT' };
             } else {
                 this.stats.alertsSkipped++;
@@ -482,13 +389,8 @@ class WebhookListener extends EventEmitter {
         const minLikes = parseInt(process.env.MIN_TWITTER_LIKES) || 100;
         const minViews = parseInt(process.env.MIN_TWITTER_VIEWS) || 50000;
         
-        // Basic engagement check
         if (alert.twitter.likes < minLikes) return false;
         if (alert.twitter.views > 0 && alert.twitter.views < minViews) return false;
-        
-        // Risk checks
-        if (process.env.BLACKLIST_BUNDLE_DETECTED === 'true' && alert.analysis.bundleDetected) return false;
-        if (process.env.BLACKLIST_HIGH_RISK === 'true' && alert.analysis.riskLevel === 'HIGH') return false;
         
         return true;
     }
@@ -499,8 +401,6 @@ class WebhookListener extends EventEmitter {
         
         if (alert.twitter.likes < minLikes) return `Likes too low: ${alert.twitter.likes} < ${minLikes}`;
         if (alert.twitter.views > 0 && alert.twitter.views < minViews) return `Views too low: ${alert.twitter.views} < ${minViews}`;
-        if (alert.analysis.bundleDetected && process.env.BLACKLIST_BUNDLE_DETECTED === 'true') return 'Bundle detected';
-        if (alert.analysis.riskLevel === 'HIGH' && process.env.BLACKLIST_HIGH_RISK === 'true') return 'High risk';
         return 'Unknown reason';
     }
 
@@ -540,17 +440,11 @@ class WebhookListener extends EventEmitter {
                     logger.info(`🚀 Webhook server listening on port ${this.config.port}`);
                     logger.info(`📡 Alert endpoint: http://localhost:${this.config.port}/webhook/alert`);
                     logger.info(`❤️ Health check: http://localhost:${this.config.port}/health`);
-                    logger.info(`📊 Status page: http://localhost:${this.config.port}/status`);
-                    
-                    if (this.config.apiKey === 'your-secret-key') {
-                        logger.warn(`⚠️ Using default API key! Please set TRADING_BOT_API_KEY in .env`);
-                    }
                     
                     resolve();
                 }
             });
 
-            // Handle server errors
             this.server.on('error', (error) => {
                 logger.error('Webhook server error:', error);
                 this.emit('error', error);

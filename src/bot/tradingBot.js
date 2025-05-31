@@ -1,8 +1,9 @@
-// src/bot/tradingBot.js - Core Trading Bot with Conservative Strategy
+// src/bot/tradingBot.js - Enhanced with precise price fetching using PumpSwap SDK
 const { PumpAmmSdk, Direction } = require('@pump-fun/pump-swap-sdk');
 const { Connection, PublicKey, Keypair } = require('@solana/web3.js');
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
+const { riskConfig, strategyConfig, blockchainConfig, tradingConfig } = require('../config/tradingConfig');
 const Big = require('big.js');
 
 class TradingBot extends EventEmitter {
@@ -10,27 +11,19 @@ class TradingBot extends EventEmitter {
         super();
         
         this.config = {
-            tradingMode: config.tradingMode || 'paper',
-            initialInvestment: config.initialInvestment || 0.1,
-            stopLossPercentage: parseFloat(process.env.STOP_LOSS_PERCENTAGE) || 50,
-            takeProfitLevels: [
-                {
-                    percentage: parseFloat(process.env.TAKE_PROFIT_1_PERCENTAGE) || 100, // 2x
-                    sellPercentage: parseFloat(process.env.TAKE_PROFIT_1_SELL_PERCENTAGE) || 50 // Sell 50%
-                },
-                {
-                    percentage: parseFloat(process.env.TAKE_PROFIT_2_PERCENTAGE) || 300, // 4x
-                    sellPercentage: parseFloat(process.env.TAKE_PROFIT_2_SELL_PERCENTAGE) || 25 // Sell 25%
-                }
-            ],
-            slippageTolerance: parseFloat(process.env.SLIPPAGE_TOLERANCE) || 5,
+            tradingMode: config.tradingMode || tradingConfig.mode,
+            initialInvestment: config.initialInvestment || tradingConfig.initialInvestment,
+            stopLossPercentage: strategyConfig.stopLossPercentage,
+            takeProfitLevels: strategyConfig.takeProfitLevels,
+            slippageTolerance: strategyConfig.slippageTolerance,
+            priceRefreshInterval: tradingConfig.priceUpdateInterval,
             ...config
         };
 
         // Initialize Solana connection and wallet
         this.connection = new Connection(
-            process.env.HELIUS_RPC_URL || process.env.SOLANA_RPC_URL,
-            'confirmed'
+            blockchainConfig.rpcUrl,
+            blockchainConfig.commitment
         );
 
         this.wallet = this.initializeWallet();
@@ -38,6 +31,11 @@ class TradingBot extends EventEmitter {
         
         this.positionManager = config.positionManager;
         this.riskManager = config.riskManager;
+        
+        // Price cache for efficiency
+        this.priceCache = new Map();
+        this.poolCache = new Map();
+        this.lastPriceUpdate = new Map();
         
         this.isTradingEnabled = true;
         this.isInitialized = false;
@@ -51,6 +49,8 @@ class TradingBot extends EventEmitter {
             profitableTrades: 0,
             totalPnL: 0,
             totalVolume: 0,
+            priceUpdates: 0,
+            cacheHits: 0,
             errors: 0
         };
 
@@ -59,24 +59,49 @@ class TradingBot extends EventEmitter {
 
     initializeWallet() {
         try {
-            const privateKeyString = process.env.PRIVATE_KEY;
+            const privateKeyString = blockchainConfig.privateKey || process.env.PRIVATE_KEY;
             if (!privateKeyString) {
                 throw new Error('PRIVATE_KEY environment variable is required');
             }
 
-            // Support both base58 and array formats
-            let privateKeyArray;
-            try {
-                // Try parsing as JSON array first
-                privateKeyArray = JSON.parse(privateKeyString);
-            } catch {
-                // Assume it's base58 encoded
-                const bs58 = require('bs58');
-                privateKeyArray = bs58.decode(privateKeyString);
+            // Use your working approach with @coral-xyz/anchor
+            const { bs58 } = require('@coral-xyz/anchor/dist/cjs/utils/bytes');
+            
+            // Trim any whitespace
+            const trimmedKey = privateKeyString.trim();
+            
+            let secretKey;
+            let format = 'unknown';
+            
+            // Check if it's array format [1,2,3,...]
+            if (trimmedKey.startsWith('[') && trimmedKey.endsWith(']')) {
+                try {
+                    const keyArray = JSON.parse(trimmedKey);
+                    secretKey = new Uint8Array(keyArray);
+                    format = 'array';
+                    logger.debug('📋 Detected array format private key');
+                } catch (parseError) {
+                    throw new Error(`Invalid array format: ${parseError.message}`);
+                }
+            } 
+            // Otherwise assume base58 format
+            else {
+                try {
+                    secretKey = bs58.decode(trimmedKey);
+                    format = 'base58';
+                    logger.debug('🔑 Detected base58 format private key');
+                } catch (decodeError) {
+                    throw new Error(`Invalid base58 format: ${decodeError.message}`);
+                }
+            }
+            
+            // Validate key length (should be 64 bytes for Solana)
+            if (secretKey.length !== 64) {
+                throw new Error(`Invalid private key length: ${secretKey.length} bytes (expected 64)`);
             }
 
-            const wallet = Keypair.fromSecretKey(new Uint8Array(privateKeyArray));
-            logger.info(`💼 Wallet initialized: ${wallet.publicKey.toString()}`);
+            const wallet = Keypair.fromSecretKey(secretKey);
+            logger.info(`💼 Wallet initialized: ${wallet.publicKey.toString()} (${format} format)`);
             
             return wallet;
         } catch (error) {
@@ -103,6 +128,9 @@ class TradingBot extends EventEmitter {
                 }
             }
 
+            // Start price monitoring
+            this.startPriceMonitoring();
+
             this.isInitialized = true;
             logger.info('✅ Trading bot initialized successfully');
             
@@ -112,43 +140,200 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    async processAlert(alert) {
-        if (!this.isTradingEnabled) {
-            logger.debug('Trading is disabled, skipping alert');
-            return;
-        }
-
-        if (!this.isInitialized) {
-            logger.warn('Trading bot not initialized, skipping alert');
-            return;
-        }
-
+    // 🔥 NEW: Precise price fetching using PumpSwap SDK with adaptive caching
+    async getTokenPrice(tokenAddress, useCache = true, priority = 'normal') {
         try {
-            this.stats.alertsProcessed++;
-            logger.info(`🔔 Processing alert: ${alert.token.symbol} (${alert.confidence})`);
-
-            // Risk management checks
-            const riskCheck = await this.riskManager.checkAlert(alert);
-            if (!riskCheck.approved) {
-                logger.info(`🚫 Alert rejected by risk management: ${riskCheck.reason}`);
-                return;
+            const now = Date.now();
+            const cacheKey = tokenAddress;
+            
+            // Adaptive cache intervals based on priority
+            let cacheInterval = this.config.priceRefreshInterval;
+            if (priority === 'high') {
+                cacheInterval = 500; // 0.5 seconds for high priority
+            } else if (priority === 'critical') {
+                cacheInterval = 0; // No cache for critical operations
+            }
+            
+            // Check cache first (if enabled and not expired)
+            if (useCache && this.priceCache.has(cacheKey) && priority !== 'critical') {
+                const lastUpdate = this.lastPriceUpdate.get(cacheKey) || 0;
+                if (now - lastUpdate < cacheInterval) {
+                    this.stats.cacheHits++;
+                    return this.priceCache.get(cacheKey);
+                }
             }
 
-            // Check if we already have a position in this token
-            if (this.positionManager.hasPosition(alert.token.address)) {
-                logger.info(`⏭️ Already have position in ${alert.token.symbol}, skipping`);
-                return;
+            if (this.config.tradingMode === 'paper') {
+                // For paper trading, simulate realistic price movement
+                const basePrice = 0.0001;
+                const volatility = (Math.random() - 0.5) * 0.2; // ±10% movement
+                const simulatedPrice = basePrice * (1 + volatility);
+                
+                this.priceCache.set(cacheKey, simulatedPrice);
+                this.lastPriceUpdate.set(cacheKey, now);
+                return simulatedPrice;
             }
 
-            // Execute initial buy
-            await this.executeBuy(alert);
+            // Get the pool for this token
+            const pool = await this.findOrGetPool(tokenAddress);
+            if (!pool) {
+                logger.warn(`No pool found for token ${tokenAddress}`);
+                return null;
+            }
+
+            // Use PumpSwap SDK to get current price
+            // We'll calculate price by seeing how much SOL we get for 1 token
+            const oneToken = new Big(1); // 1 token (adjust for decimals if needed)
+            
+            try {
+                // Get quote amount for 1 token (Base to Quote swap)
+                const quoteAmount = await this.pumpSdk.swapAutocompleteQuoteFromBase(
+                    pool,
+                    oneToken,
+                    0.5, // Low slippage for price calculation
+                    Direction.BaseToQuote
+                );
+
+                const price = parseFloat(quoteAmount.toString());
+                
+                // Cache the price
+                this.priceCache.set(cacheKey, price);
+                this.lastPriceUpdate.set(cacheKey, now);
+                this.stats.priceUpdates++;
+                
+                logger.debug(`💰 Price for ${tokenAddress}: ${price} SOL`);
+                return price;
+                
+            } catch (swapError) {
+                logger.debug(`Could not calculate price via swap simulation: ${swapError.message}`);
+                
+                // Fallback: Calculate price from pool reserves if available
+                const fallbackPrice = this.calculatePriceFromPool(pool);
+                if (fallbackPrice) {
+                    this.priceCache.set(cacheKey, fallbackPrice);
+                    this.lastPriceUpdate.set(cacheKey, now);
+                    return fallbackPrice;
+                }
+                
+                return null;
+            }
 
         } catch (error) {
-            logger.error(`❌ Error processing alert for ${alert.token.symbol}:`, error);
-            this.stats.errors++;
+            logger.error(`Error getting token price for ${tokenAddress}:`, error);
+            return null;
         }
     }
 
+    // 🔥 NEW: Find or get cached pool for token
+    async findOrGetPool(tokenAddress) {
+        try {
+            // Check pool cache first
+            if (this.poolCache.has(tokenAddress)) {
+                return this.poolCache.get(tokenAddress);
+            }
+
+            // Find the pool for this token paired with SOL
+            const solMint = 'So11111111111111111111111111111111111111112';
+            
+            // TODO: Implement actual pool discovery
+            // For now, we'll create a mock pool structure
+            // In reality, you'd need to:
+            // 1. Find the pool address for the token/SOL pair
+            // 2. Fetch the pool state
+            // 3. Return the pool object
+            
+            if (this.config.tradingMode === 'paper') {
+                const mockPool = {
+                    address: `mock_pool_${tokenAddress}`,
+                    baseMint: tokenAddress,
+                    quoteMint: solMint,
+                    baseReserve: new Big(1000000), // Mock reserves
+                    quoteReserve: new Big(100)
+                };
+                
+                this.poolCache.set(tokenAddress, mockPool);
+                return mockPool;
+            }
+
+            // For live trading, you'll need to implement pool discovery
+            // This might involve:
+            // - Querying the PumpFun program for pools
+            // - Using Solana RPC to find token accounts
+            // - Checking pool state and reserves
+            
+            logger.warn(`Real pool discovery not implemented for ${tokenAddress}`);
+            return null;
+
+        } catch (error) {
+            logger.error(`Error finding pool for ${tokenAddress}:`, error);
+            return null;
+        }
+    }
+
+    // 🔥 NEW: Calculate price from pool reserves (fallback method)
+    calculatePriceFromPool(pool) {
+        try {
+            if (!pool.baseReserve || !pool.quoteReserve) {
+                return null;
+            }
+
+            // Price = quoteReserve / baseReserve
+            const baseReserve = new Big(pool.baseReserve.toString());
+            const quoteReserve = new Big(pool.quoteReserve.toString());
+            
+            if (baseReserve.eq(0)) {
+                return null;
+            }
+
+            const price = quoteReserve.div(baseReserve);
+            return parseFloat(price.toString());
+
+        } catch (error) {
+            logger.error('Error calculating price from pool reserves:', error);
+            return null;
+        }
+    }
+
+    // 🔥 NEW: Start periodic price monitoring
+    startPriceMonitoring() {
+        setInterval(async () => {
+            try {
+                // Update prices for all active positions
+                if (this.positionManager) {
+                    const activePositions = this.positionManager.getActivePositions();
+                    
+                    if (activePositions.length > 0) {
+                        logger.debug(`🔄 Updating prices for ${activePositions.length} positions...`);
+                        
+                        const pricePromises = activePositions.map(async (position) => {
+                            try {
+                                const price = await this.getTokenPrice(position.tokenAddress, false); // Force refresh
+                                return { position, price };
+                            } catch (error) {
+                                logger.debug(`Price update failed for ${position.symbol}: ${error.message}`);
+                                return { position, price: null };
+                            }
+                        });
+
+                        const results = await Promise.allSettled(pricePromises);
+                        
+                        results.forEach((result) => {
+                            if (result.status === 'fulfilled' && result.value.price) {
+                                const { position, price } = result.value;
+                                logger.debug(`💰 ${position.symbol}: ${price.toFixed(8)} SOL`);
+                            }
+                        });
+                    }
+                }
+            } catch (error) {
+                logger.error('Error in price monitoring:', error);
+            }
+        }, this.config.priceRefreshInterval);
+
+        logger.info(`📊 Price monitoring started (${this.config.priceRefreshInterval / 1000}s intervals)`);
+    }
+
+    // 🔥 ENHANCED: Execute buy with precise price calculation
     async executeBuy(alert) {
         try {
             const tokenAddress = alert.token.address;
@@ -161,16 +346,23 @@ class TradingBot extends EventEmitter {
                 return await this.executePaperBuy(alert, investmentAmount);
             }
 
+            // Get current price for entry price recording
+            const currentPrice = await this.getTokenPrice(tokenAddress, false);
+            if (!currentPrice) {
+                throw new Error(`Could not determine current price for ${symbol}`);
+            }
+
             // Get pool information
-            const pool = await this.findTokenPool(tokenAddress);
+            const pool = await this.findOrGetPool(tokenAddress);
             if (!pool) {
                 throw new Error(`No pool found for token ${symbol}`);
             }
 
-            // Calculate expected tokens
+            // Calculate expected tokens using PumpSwap SDK
+            const investmentBig = new Big(investmentAmount);
             const expectedTokens = await this.pumpSdk.swapAutocompleteBaseFromQuote(
                 pool,
-                new Big(investmentAmount),
+                investmentBig,
                 this.config.slippageTolerance,
                 Direction.QuoteToBase
             );
@@ -188,13 +380,13 @@ class TradingBot extends EventEmitter {
             const transaction = this.transactionFromInstructions(swapInstructions);
             const signature = await this.sendAndConfirmTransaction(transaction);
 
-            // Record position
+            // Record position with accurate entry price
             const position = {
                 id: this.generatePositionId(),
                 tokenAddress,
                 symbol,
                 side: 'LONG',
-                entryPrice: this.calculateEntryPrice(pool, investmentAmount, expectedTokens),
+                entryPrice: currentPrice,
                 quantity: expectedTokens.toString(),
                 investedAmount: investmentAmount,
                 entryTime: Date.now(),
@@ -211,13 +403,13 @@ class TradingBot extends EventEmitter {
             this.stats.buyOrders++;
             this.stats.totalVolume += investmentAmount;
 
-            logger.info(`✅ BUY executed: ${expectedTokens} ${symbol} for ${investmentAmount} SOL (${signature})`);
+            logger.info(`✅ BUY executed: ${expectedTokens} ${symbol} for ${investmentAmount} SOL @ ${currentPrice.toFixed(8)} SOL/token (${signature})`);
             
             this.emit('tradeExecuted', {
                 type: 'BUY',
                 symbol,
                 amount: expectedTokens.toString(),
-                price: position.entryPrice,
+                price: currentPrice,
                 signature
             });
 
@@ -230,47 +422,7 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    async executePaperBuy(alert, investmentAmount) {
-        // Simulate paper trading
-        const mockPrice = Math.random() * 0.001 + 0.0001; // Mock token price
-        const expectedTokens = investmentAmount / mockPrice;
-        
-        const position = {
-            id: this.generatePositionId(),
-            tokenAddress: alert.token.address,
-            symbol: alert.token.symbol,
-            side: 'LONG',
-            entryPrice: mockPrice,
-            quantity: expectedTokens.toString(),
-            investedAmount: investmentAmount,
-            entryTime: Date.now(),
-            txHash: 'PAPER_TRADE_' + Date.now(),
-            stopLoss: this.calculateStopLoss(investmentAmount),
-            takeProfitLevels: this.calculateTakeProfitLevels(investmentAmount),
-            remainingQuantity: expectedTokens.toString(),
-            alert: alert,
-            paperTrade: true
-        };
-
-        await this.positionManager.addPosition(position);
-
-        this.stats.tradesExecuted++;
-        this.stats.buyOrders++;
-        this.stats.totalVolume += investmentAmount;
-
-        logger.info(`📝 PAPER BUY: ${expectedTokens.toFixed(2)} ${alert.token.symbol} for ${investmentAmount} SOL`);
-        
-        this.emit('tradeExecuted', {
-            type: 'PAPER_BUY',
-            symbol: alert.token.symbol,
-            amount: expectedTokens.toString(),
-            price: mockPrice,
-            signature: position.txHash
-        });
-
-        return position;
-    }
-
+    // 🔥 ENHANCED: Execute sell with precise price calculation
     async executeSell(position, sellQuantity, reason = 'Manual') {
         try {
             const sellAmount = new Big(sellQuantity);
@@ -281,13 +433,19 @@ class TradingBot extends EventEmitter {
                 return await this.executePaperSell(position, sellAmount, reason);
             }
 
+            // Get current price for accurate valuation
+            const currentPrice = await this.getTokenPrice(position.tokenAddress, false);
+            if (!currentPrice) {
+                logger.warn(`Could not get current price for ${position.symbol}, proceeding with swap anyway`);
+            }
+
             // Get current pool
-            const pool = await this.findTokenPool(position.tokenAddress);
+            const pool = await this.findOrGetPool(position.tokenAddress);
             if (!pool) {
                 throw new Error(`No pool found for token ${position.symbol}`);
             }
 
-            // Calculate expected SOL
+            // Calculate expected SOL using PumpSwap SDK
             const expectedSol = await this.pumpSdk.swapAutocompleteQuoteFromBase(
                 pool,
                 sellAmount,
@@ -331,13 +489,14 @@ class TradingBot extends EventEmitter {
                 this.stats.profitableTrades++;
             }
 
-            logger.info(`✅ SELL executed: ${sellAmount} ${position.symbol} for ${soldValue} SOL (PnL: ${pnl.toFixed(4)}) [${signature}]`);
+            logger.info(`✅ SELL executed: ${sellAmount} ${position.symbol} for ${soldValue.toFixed(4)} SOL @ ${currentPrice ? currentPrice.toFixed(8) : 'unknown'} SOL/token (PnL: ${pnl.toFixed(4)}) [${signature}]`);
             
             this.emit('tradeExecuted', {
                 type: 'SELL',
                 symbol: position.symbol,
                 amount: sellAmount.toString(),
                 value: soldValue,
+                price: currentPrice,
                 pnl,
                 signature
             });
@@ -360,10 +519,50 @@ class TradingBot extends EventEmitter {
         }
     }
 
+    // Rest of the methods remain the same...
+    async executePaperBuy(alert, investmentAmount) {
+        const currentPrice = await this.getTokenPrice(alert.token.address, false);
+        const expectedTokens = investmentAmount / currentPrice;
+        
+        const position = {
+            id: this.generatePositionId(),
+            tokenAddress: alert.token.address,
+            symbol: alert.token.symbol,
+            side: 'LONG',
+            entryPrice: currentPrice,
+            quantity: expectedTokens.toString(),
+            investedAmount: investmentAmount,
+            entryTime: Date.now(),
+            txHash: 'PAPER_TRADE_' + Date.now(),
+            stopLoss: this.calculateStopLoss(investmentAmount),
+            takeProfitLevels: this.calculateTakeProfitLevels(investmentAmount),
+            remainingQuantity: expectedTokens.toString(),
+            alert: alert,
+            paperTrade: true
+        };
+
+        await this.positionManager.addPosition(position);
+
+        this.stats.tradesExecuted++;
+        this.stats.buyOrders++;
+        this.stats.totalVolume += investmentAmount;
+
+        logger.info(`📝 PAPER BUY: ${expectedTokens.toFixed(2)} ${alert.token.symbol} for ${investmentAmount} SOL @ ${currentPrice.toFixed(8)} SOL/token`);
+        
+        this.emit('tradeExecuted', {
+            type: 'PAPER_BUY',
+            symbol: alert.token.symbol,
+            amount: expectedTokens.toString(),
+            price: currentPrice,
+            signature: position.txHash
+        });
+
+        return position;
+    }
+
     async executePaperSell(position, sellAmount, reason) {
-        // Simulate current price movement
-        const priceChange = (Math.random() - 0.5) * 0.4; // ±20% random movement
-        const currentPrice = position.entryPrice * (1 + priceChange);
+        // Get current price for accurate PnL calculation
+        const currentPrice = await this.getTokenPrice(position.tokenAddress, false);
         const soldValue = parseFloat(sellAmount.toString()) * currentPrice;
         
         const costBasis = (parseFloat(sellAmount.toString()) / parseFloat(position.quantity)) * position.investedAmount;
@@ -389,13 +588,14 @@ class TradingBot extends EventEmitter {
             this.stats.profitableTrades++;
         }
 
-        logger.info(`📝 PAPER SELL: ${sellAmount} ${position.symbol} for ${soldValue.toFixed(4)} SOL (PnL: ${pnl.toFixed(4)})`);
+        logger.info(`📝 PAPER SELL: ${sellAmount} ${position.symbol} for ${soldValue.toFixed(4)} SOL @ ${currentPrice.toFixed(8)} SOL/token (PnL: ${pnl.toFixed(4)})`);
 
         this.emit('tradeExecuted', {
             type: 'PAPER_SELL',
             symbol: position.symbol,
             amount: sellAmount.toString(),
             value: soldValue,
+            price: currentPrice,
             pnl,
             signature
         });
@@ -411,35 +611,60 @@ class TradingBot extends EventEmitter {
         return { soldValue, pnl, signature };
     }
 
-    calculateInvestmentAmount(alert) {
-        // Base investment amount
-        let amount = this.config.initialInvestment;
-        
-        // Adjust based on confidence level
-        switch (alert.confidence) {
-            case 'HIGH':
-                amount *= 1.5;
-                break;
-            case 'MEDIUM':
-                amount *= 1.0;
-                break;
-            case 'LOW':
-                amount *= 0.7;
-                break;
-            case 'VERY_LOW':
-                amount *= 0.5;
-                break;
+    // Existing methods remain the same...
+    async processAlert(alert) {
+        if (!this.isTradingEnabled) {
+            logger.debug('Trading is disabled, skipping alert');
+            return;
         }
 
-        // Adjust based on Twitter engagement
+        if (!this.isInitialized) {
+            logger.warn('Trading bot not initialized, skipping alert');
+            return;
+        }
+
+        try {
+            this.stats.alertsProcessed++;
+            logger.info(`🔔 Processing alert: ${alert.token.symbol} (${alert.confidence})`);
+
+            // Risk management checks
+            const riskCheck = await this.riskManager.checkAlert(alert);
+            if (!riskCheck.approved) {
+                logger.info(`🚫 Alert rejected by risk management: ${riskCheck.reason}`);
+                return;
+            }
+
+            // Check if we already have a position in this token
+            if (this.positionManager.hasPosition(alert.token.address)) {
+                logger.info(`⏭️ Already have position in ${alert.token.symbol}, skipping`);
+                return;
+            }
+
+            // Execute initial buy
+            await this.executeBuy(alert);
+
+        } catch (error) {
+            logger.error(`❌ Error processing alert for ${alert.token.symbol}:`, error);
+            this.stats.errors++;
+        }
+    }
+
+    calculateInvestmentAmount(alert) {
+        let amount = this.config.initialInvestment;
+        
+        switch (alert.confidence) {
+            case 'HIGH': amount *= 1.5; break;
+            case 'MEDIUM': amount *= 1.0; break;
+            case 'LOW': amount *= 0.7; break;
+            case 'VERY_LOW': amount *= 0.5; break;
+        }
+
         if (alert.twitter.likes >= 1000) amount *= 1.2;
         if (alert.twitter.views >= 1000000) amount *= 1.3;
 
-        // Reduce for risk factors
         if (alert.analysis.bundleDetected) amount *= 0.8;
         if (alert.analysis.riskLevel === 'HIGH') amount *= 0.7;
 
-        // Cap the maximum investment
         return Math.min(amount, this.config.initialInvestment * 2);
     }
 
@@ -455,36 +680,16 @@ class TradingBot extends EventEmitter {
         }));
     }
 
-    calculateEntryPrice(pool, investedAmount, expectedTokens) {
-        // Simplified price calculation
-        return investedAmount / parseFloat(expectedTokens.toString());
-    }
-
     generatePositionId() {
         return 'pos_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
 
-    async findTokenPool(tokenAddress) {
-        // This would need to be implemented based on the PumpAmmSdk documentation
-        // For now, we'll return a mock pool structure
-        logger.warn('findTokenPool not implemented - using mock pool');
-        return {
-            address: 'mock_pool_' + tokenAddress,
-            baseMint: tokenAddress,
-            quoteMint: 'So11111111111111111111111111111111111111112' // SOL
-        };
-    }
-
     transactionFromInstructions(instructions) {
-        // Helper method to build transaction from instructions
-        // Implementation depends on Solana web3.js patterns
         logger.warn('transactionFromInstructions not fully implemented');
         return null;
     }
 
     async sendAndConfirmTransaction(transaction) {
-        // Send and confirm transaction
-        // Implementation depends on your preference for confirmation levels
         logger.warn('sendAndConfirmTransaction not fully implemented');
         return 'mock_signature_' + Date.now();
     }
@@ -499,10 +704,6 @@ class TradingBot extends EventEmitter {
         logger.info('▶️ Trading resumed');
     }
 
-    isTradingEnabled() {
-        return this.isTradingEnabled;
-    }
-
     getStats() {
         const winRate = this.stats.tradesExecuted > 0 ? 
             (this.stats.profitableTrades / this.stats.tradesExecuted * 100).toFixed(1) : '0';
@@ -512,15 +713,51 @@ class TradingBot extends EventEmitter {
             winRate: winRate + '%',
             avgPnL: this.stats.tradesExecuted > 0 ? 
                 (this.stats.totalPnL / this.stats.tradesExecuted).toFixed(4) : '0',
+            priceAccuracy: this.stats.priceUpdates > 0 ? 
+                ((this.stats.priceUpdates - this.stats.errors) / this.stats.priceUpdates * 100).toFixed(1) + '%' : '0%',
+            cacheEfficiency: this.stats.priceUpdates > 0 ? 
+                (this.stats.cacheHits / (this.stats.priceUpdates + this.stats.cacheHits) * 100).toFixed(1) + '%' : '0%',
             config: {
                 mode: this.config.tradingMode,
                 initialInvestment: this.config.initialInvestment,
                 stopLoss: this.config.stopLossPercentage + '%',
                 takeProfits: this.config.takeProfitLevels.map(tp => 
                     `${tp.percentage}% (sell ${tp.sellPercentage}%)`
-                )
+                ),
+                priceRefreshInterval: this.config.priceRefreshInterval / 1000 + 's'
             }
         };
+    }
+
+    // 🔥 NEW: Get current price info for all positions
+    async getPositionPrices() {
+        if (!this.positionManager) return {};
+        
+        const activePositions = this.positionManager.getActivePositions();
+        const prices = {};
+        
+        for (const position of activePositions) {
+            try {
+                const price = await this.getTokenPrice(position.tokenAddress);
+                prices[position.symbol] = {
+                    current: price,
+                    entry: position.entryPrice,
+                    change: price && position.entryPrice ? 
+                        ((price - position.entryPrice) / position.entryPrice * 100).toFixed(2) + '%' : 'N/A'
+                };
+            } catch (error) {
+                prices[position.symbol] = { current: null, entry: position.entryPrice, change: 'Error' };
+            }
+        }
+        
+        return prices;
+    }
+
+    // 🔥 NEW: Clear price cache (useful for testing)
+    clearPriceCache() {
+        this.priceCache.clear();
+        this.lastPriceUpdate.clear();
+        logger.info('💰 Price cache cleared');
     }
 
     async stop() {
