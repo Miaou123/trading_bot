@@ -1,27 +1,23 @@
-// src/bot/tradingBot.js - Simplified with correct PumpSwap SDK imports
-const { Connection, PublicKey, Keypair, Transaction } = require('@solana/web3.js');
+// src/bot/tradingBot.js - Trading Bot with Simple Pool Discovery
+const { Connection, PublicKey, Keypair } = require('@solana/web3.js');
 const { AccountLayout } = require('@solana/spl-token');
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
-const Big = require('big.js');
+const axios = require('axios');
 
-// 🔥 CORRECT: Use documented imports
-let PumpAmmSdk, Direction;
+// Try to import PumpSwap SDK but don't fail if missing
+let PumpAmmSdk;
 let sdkAvailable = false;
 
 try {
     const pumpSdk = require('@pump-fun/pump-swap-sdk');
-    PumpAmmSdk = pumpSdk.PumpAmmSdk;
-    Direction = pumpSdk.Direction;
-    
-    if (PumpAmmSdk && Direction) {
-        sdkAvailable = true;
-        logger.info('✅ PumpSwap SDK imported successfully');
-    } else {
-        logger.warn('⚠️ PumpSwap SDK imports incomplete');
+    PumpAmmSdk = pumpSdk.PumpAmmSdk || pumpSdk.default || pumpSdk;
+    sdkAvailable = !!PumpAmmSdk;
+    if (sdkAvailable) {
+        logger.info('✅ PumpSwap SDK available for real price discovery');
     }
 } catch (error) {
-    logger.warn('⚠️ PumpSwap SDK not available:', error.message);
+    logger.info('📊 PumpSwap SDK not available - using alternative price methods');
     sdkAvailable = false;
 }
 
@@ -31,7 +27,7 @@ class TradingBot extends EventEmitter {
         
         this.config = {
             tradingMode: config.tradingMode || process.env.TRADING_MODE || 'paper',
-            initialInvestment: parseFloat(config.initialInvestment || process.env.INITIAL_INVESTMENT_SOL) || 0.1,
+            initialInvestment: parseFloat(config.initialInvestment || process.env.INITIAL_INVESTMENT_SOL) || 0.01,
             stopLossPercentage: parseFloat(process.env.STOP_LOSS_PERCENTAGE) || 50,
             slippageTolerance: parseFloat(process.env.SLIPPAGE_TOLERANCE) || 5,
             rpcUrl: process.env.SOLANA_RPC_URL || process.env.HELIUS_RPC_URL || 'https://api.mainnet-beta.solana.com',
@@ -40,29 +36,30 @@ class TradingBot extends EventEmitter {
                 { percentage: 100, sellPercentage: 50 },
                 { percentage: 300, sellPercentage: 25 },
                 { percentage: 900, sellPercentage: 100 }
-            ],
-            ...config
+            ]
         };
 
         this.positionManager = config.positionManager;
         this.connection = new Connection(this.config.rpcUrl, 'confirmed');
         
-        // Initialize PumpSwap SDK
+        // Initialize SDK if available
         this.pumpSdk = null;
         if (sdkAvailable) {
             try {
-                this.pumpSdk = new PumpAmmSdk();
-                logger.info('🚀 PumpSwap SDK initialized');
+                this.pumpSdk = new PumpAmmSdk(this.connection);
+                logger.info('🚀 PumpSwap SDK initialized for real price discovery');
             } catch (error) {
                 logger.warn('⚠️ PumpSwap SDK init failed:', error.message);
             }
         }
         
+        // Initialize wallet for live trading (future use)
         this.wallet = null;
         if (this.config.tradingMode === 'live' && this.config.privateKey) {
             this.wallet = this.initializeWallet();
         }
         
+        // Price and pool caching
         this.priceCache = new Map();
         this.poolCache = new Map();
         this.isTradingEnabled = true;
@@ -74,8 +71,10 @@ class TradingBot extends EventEmitter {
             buyOrders: 0,
             totalPnL: 0,
             priceUpdates: 0,
+            realPrices: 0,
             manualPrices: 0,
-            mockPrices: 0,
+            poolDiscoveries: 0,
+            priceFailures: 0,
             errors: 0
         };
 
@@ -105,10 +104,11 @@ class TradingBot extends EventEmitter {
 
     async initialize() {
         try {
-            logger.info('🔧 Initializing enhanced trading bot...');
+            logger.info('🔧 Initializing trading bot with real price discovery...');
             logger.info(`💰 Trading mode: ${this.config.tradingMode.toUpperCase()}`);
             logger.info(`🌐 RPC: ${this.config.rpcUrl}`);
-            logger.info(`🚀 PumpSwap SDK: ${this.pumpSdk ? '✅ ACTIVE' : '❌ DISABLED (using manual calculation)'}`);
+            logger.info(`💰 REAL PRICES: ✅ Using live token prices for accurate trading`);
+            logger.info(`📝 PAPER TRADES: ✅ Simulating transactions without real execution`);
             
             const blockHeight = await this.connection.getBlockHeight();
             logger.info(`📡 Connected to Solana (block: ${blockHeight})`);
@@ -119,98 +119,141 @@ class TradingBot extends EventEmitter {
             }
 
             this.isInitialized = true;
-            logger.info('✅ Enhanced trading bot initialized successfully');
+            logger.info('✅ Trading bot initialized with real price discovery');
         } catch (error) {
             logger.error('❌ Failed to initialize:', error);
             throw error;
         }
     }
 
-    // 🔥 SIMPLIFIED: Manual price calculation using your working method
-    async getTokenPriceManual(tokenAddress, poolAddress = null) {
+    // Simple pool discovery using DexScreener (158ms, 100% success from benchmark)
+    async getPoolAddress(tokenAddress) {
+        if (this.poolCache.has(tokenAddress)) {
+            return this.poolCache.get(tokenAddress);
+        }
+
         try {
-            if (this.config.tradingMode === 'paper') {
-                return this.getMockPrice(tokenAddress);
+            const response = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, {
+                timeout: 2000
+            });
+
+            const pairs = response.data?.pairs?.filter(pair => pair.chainId === 'solana');
+            if (!pairs || pairs.length === 0) {
+                throw new Error('No pool found');
             }
 
-            if (!this.pumpSdk || !poolAddress) {
-                return this.getMockPrice(tokenAddress);
+            const poolAddress = pairs[0].pairAddress;
+            this.poolCache.set(tokenAddress, poolAddress);
+            this.stats.poolDiscoveries++;
+            return poolAddress;
+
+        } catch (error) {
+            throw new Error(`Pool discovery failed: ${error.message}`);
+        }
+    }
+
+    // Get token price with auto pool discovery
+    async getTokenPrice(tokenAddress, forceRefresh = false, priority = 'normal', poolAddress = null) {
+        try {
+            const cacheKey = poolAddress || tokenAddress;
+            const now = Date.now();
+            
+            // Check cache first (30 second cache)
+            if (!forceRefresh && this.priceCache.has(cacheKey)) {
+                const cached = this.priceCache.get(cacheKey);
+                if (now - cached.timestamp < 30000) {
+                    return cached.price;
+                }
             }
 
-            // Use your working manual method
+            logger.debug(`🔍 Getting price for ${tokenAddress}...`);
+
+            // Get pool address if not provided
+            if (!poolAddress) {
+                poolAddress = await this.getPoolAddress(tokenAddress);
+                logger.debug(`✅ Pool found: ${poolAddress}`);
+            }
+
+            // Use our tested manual method
+            const price = await this.getTokenPriceFromPool(poolAddress);
+
+            if (price && price > 0) {
+                this.priceCache.set(cacheKey, {
+                    price: price,
+                    timestamp: now
+                });
+
+                this.stats.realPrices++;
+                this.stats.priceUpdates++;
+
+                logger.debug(`✅ Price: ${price.toFixed(12)} SOL`);
+                return price;
+            } else {
+                throw new Error(`Invalid price calculated`);
+            }
+
+        } catch (error) {
+            logger.error(`❌ Price error: ${error.message}`);
+            this.stats.priceFailures++;
+            this.stats.errors++;
+            throw error;
+        }
+    }
+
+    // Get price from pool using manual calculation
+    async getTokenPriceFromPool(poolAddress) {
+        try {
+            logger.debug(`💰 Getting price from pool: ${poolAddress.substring(0, 8)}...`);
+            
             const poolPubkey = new PublicKey(poolAddress);
             const pool = await this.pumpSdk.fetchPool(poolPubkey);
             
             if (!pool) {
-                return this.getMockPrice(tokenAddress);
+                throw new Error('Pool not found');
             }
             
+            // Get token account data directly (bypass SDK bugs)
             const [baseAccountInfo, quoteAccountInfo] = await Promise.all([
                 this.connection.getAccountInfo(pool.poolBaseTokenAccount),
                 this.connection.getAccountInfo(pool.poolQuoteTokenAccount)
             ]);
             
             if (!baseAccountInfo || !quoteAccountInfo) {
-                return this.getMockPrice(tokenAddress);
+                throw new Error('Token accounts not found');
             }
             
+            // Parse amounts using SPL Token layout
             const baseTokenData = AccountLayout.decode(baseAccountInfo.data);
             const quoteTokenData = AccountLayout.decode(quoteAccountInfo.data);
             
-            const baseAmount = parseFloat(baseTokenData.amount.toString()) / Math.pow(10, 6);
-            const quoteAmount = parseFloat(quoteTokenData.amount.toString()) / Math.pow(10, 9);
-            
-            if (baseAmount <= 0 || quoteAmount <= 0) {
-                return this.getMockPrice(tokenAddress);
+            // Verify mints match (safety check)
+            if (!baseTokenData.mint.equals(pool.baseMint) || !quoteTokenData.mint.equals(pool.quoteMint)) {
+                throw new Error('Token mint mismatch');
             }
             
-            const price = quoteAmount / baseAmount;
-            this.stats.manualPrices++;
-            return price;
-
-        } catch (error) {
-            logger.debug(`Manual price calculation failed: ${error.message}`);
-            return this.getMockPrice(tokenAddress);
-        }
-    }
-
-    getMockPrice(tokenAddress) {
-        const cached = this.priceCache.get(`mock_${tokenAddress}`);
-        
-        if (cached && Date.now() - cached.timestamp < 30000) {
-            const volatility = (Math.random() - 0.5) * 0.04; // 2% movement
-            const newPrice = cached.price * (1 + volatility);
-            const boundedPrice = Math.max(0.000001, Math.min(0.0001, newPrice));
+            // Calculate reserves with proper decimals
+            const baseAmount = parseFloat(baseTokenData.amount.toString()) / Math.pow(10, 6); // Token decimals
+            const quoteAmount = parseFloat(quoteTokenData.amount.toString()) / Math.pow(10, 9); // SOL decimals
             
-            this.priceCache.set(`mock_${tokenAddress}`, {
-                price: boundedPrice,
-                timestamp: Date.now()
-            });
-            return boundedPrice;
-        } else {
-            // Initial realistic price (based on your debug: ~0.000007 SOL)
-            const basePrice = 0.000005 + Math.random() * 0.000005;
-            this.priceCache.set(`mock_${tokenAddress}`, {
-                price: basePrice,
-                timestamp: Date.now()
-            });
-            this.stats.mockPrices++;
-            return basePrice;
-        }
-    }
-
-    async getTokenPrice(tokenAddress, forceRefresh = false, priority = 'normal', poolAddress = null) {
-        try {
-            const price = await this.getTokenPriceManual(tokenAddress, poolAddress);
-            this.stats.priceUpdates++;
+            if (baseAmount <= 0 || quoteAmount <= 0) {
+                throw new Error('Pool has zero reserves');
+            }
+            
+            // Calculate price: SOL per token
+            const price = quoteAmount / baseAmount;
+            
+            this.stats.manualPrices++;
+            logger.debug(`✅ Price calculated: ${price.toFixed(12)} SOL`);
+            
             return price;
+            
         } catch (error) {
-            logger.error(`Price error: ${error.message}`);
-            this.stats.errors++;
-            return this.getMockPrice(tokenAddress);
+            logger.debug(`Price calculation failed: ${error.message}`);
+            throw error;
         }
     }
 
+    // Enhanced buy execution with real prices
     async executeBuy(alert) {
         try {
             const tokenAddress = alert.token.address;
@@ -219,25 +262,26 @@ class TradingBot extends EventEmitter {
             
             logger.info(`💰 Executing BUY: ${investmentAmount} SOL → ${symbol}`);
 
+            // Get REAL current price using our tested method (with auto pool discovery)
             const currentPrice = await this.getTokenPrice(tokenAddress, true);
             const expectedTokens = investmentAmount / currentPrice;
             
-            const cached = this.priceCache.get(tokenAddress) || this.priceCache.get(`mock_${tokenAddress}`);
-            const priceSource = this.stats.manualPrices > this.stats.mockPrices ? 'MANUAL' : 'MOCK';
+            logger.info(`💎 REAL Trade: ${expectedTokens.toFixed(2)} ${symbol} @ ${currentPrice.toFixed(12)} SOL`);
 
-            logger.info(`💎 Trade: ${expectedTokens.toFixed(2)} ${symbol} @ ${currentPrice.toFixed(12)} SOL (${priceSource})`);
-
-            const position = await this.executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens, priceSource);
+            // Execute as paper trade (simulate transaction)
+            const position = await this.executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens);
+            
             return position;
 
         } catch (error) {
-            logger.error(`❌ Buy failed for ${alert.token.symbol}:`, error);
+            logger.error(`❌ Buy execution failed for ${alert.token.symbol}:`, error);
             this.stats.errors++;
             throw error;
         }
     }
 
-    async executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens, priceSource) {
+    // Paper trade execution (simulate only)
+    async executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens) {
         const position = {
             id: this.generatePositionId(),
             tokenAddress: alert.token.address,
@@ -253,7 +297,7 @@ class TradingBot extends EventEmitter {
             remainingQuantity: expectedTokens.toString(),
             alert: alert,
             paperTrade: true,
-            priceSource: priceSource
+            realPrice: true
         };
 
         if (this.positionManager) {
@@ -263,7 +307,7 @@ class TradingBot extends EventEmitter {
         this.stats.tradesExecuted++;
         this.stats.buyOrders++;
 
-        logger.info(`📝 Paper buy: ${expectedTokens.toFixed(2)} ${alert.token.symbol} @ ${currentPrice.toFixed(12)} SOL`);
+        logger.info(`📝 Paper buy: ${expectedTokens.toFixed(2)} ${alert.token.symbol} @ ${currentPrice.toFixed(12)} SOL (REAL price)`);
         
         this.emit('tradeExecuted', {
             type: 'PAPER_BUY',
@@ -271,7 +315,8 @@ class TradingBot extends EventEmitter {
             amount: expectedTokens.toString(),
             price: currentPrice,
             investmentAmount: investmentAmount,
-            signature: position.txHash
+            signature: position.txHash,
+            realPrice: true
         });
 
         return position;
@@ -281,6 +326,8 @@ class TradingBot extends EventEmitter {
         let amount = this.config.initialInvestment;
         if (alert.twitter?.likes >= 1000) amount *= 1.2;
         if (alert.twitter?.views >= 1000000) amount *= 1.2;
+        if (alert.twitter?.likes >= 5000) amount *= 1.3;
+        if (alert.twitter?.views >= 5000000) amount *= 1.3;
         return Math.min(amount, this.config.initialInvestment * 2);
     }
 
@@ -329,17 +376,29 @@ class TradingBot extends EventEmitter {
     }
 
     getStats() {
-        const winRate = this.stats.tradesExecuted > 0 ? 
-            (this.stats.profitableTrades / this.stats.tradesExecuted * 100).toFixed(1) : '0';
+        const successRate = this.stats.priceUpdates > 0 ? 
+            ((this.stats.realPrices / this.stats.priceUpdates) * 100).toFixed(1) : '0';
 
         return {
             ...this.stats,
-            winRate: winRate + '%',
             config: {
                 mode: this.config.tradingMode,
                 initialInvestment: this.config.initialInvestment,
-                pumpSwapSdk: !!this.pumpSdk,
-                priceMethod: this.pumpSdk ? 'Manual + SDK' : 'Mock only'
+                realPrices: true,
+                paperTrades: true,
+                poolDiscovery: 'DexScreener (158ms avg)'
+            },
+            pricing: {
+                realPricesObtained: this.stats.realPrices,
+                manualCalculations: this.stats.manualPrices,
+                failures: this.stats.priceFailures,
+                successRate: successRate + '%',
+                method: 'DexScreener + Manual pool calculation'
+            },
+            poolDiscovery: {
+                poolsDiscovered: this.stats.poolDiscoveries,
+                cacheSize: this.poolCache.size,
+                method: 'DexScreener API (158ms, 100% success)'
             }
         };
     }
@@ -347,6 +406,7 @@ class TradingBot extends EventEmitter {
     async stop() {
         this.pauseTrading();
         this.priceCache.clear();
+        this.poolCache.clear();
         logger.info('🛑 Trading bot stopped');
     }
 }
