@@ -1,0 +1,87 @@
+{
+  "active": {
+    "pos_1748713832812_yr6ook44d": {
+      "id": "pos_1748713832812_yr6ook44d",
+      "tokenAddress": "5eFZLAcKb3iqoTufC4PEbiVY4CrnG89KkENK8QTUpump",
+      "symbol": "TEST",
+      "side": "LONG",
+      "entryPrice": 0.000005858850678636533,
+      "quantity": "17068.194",
+      "investedAmount": 0.1,
+      "entryTime": 1748713832812,
+      "txHash": "PAPER_TRADE_1748713832812",
+      "stopLoss": 0.05,
+      "takeProfitLevels": [
+        {
+          "targetValue": 0.2,
+          "sellPercentage": 50,
+          "percentage": 100,
+          "triggered": false
+        },
+        {
+          "targetValue": 0.4,
+          "sellPercentage": 25,
+          "percentage": 300,
+          "triggered": false
+        },
+        {
+          "targetValue": 1,
+          "sellPercentage": 100,
+          "percentage": 900,
+          "triggered": false
+        }
+      ],
+      "remainingQuantity": "17068.194",
+      "alert": {
+        "token": {
+          "address": "5eFZLAcKb3iqoTufC4PEbiVY4CrnG89KkENK8QTUpump",
+          "symbol": "TEST",
+          "name": "Test Token"
+        },
+        "twitter": {
+          "likes": 54,
+          "url": "https://x.com/valvalval369/status/1928004736919163230"
+        },
+        "confidence": "MEDIUM"
+      },
+      "paperTrade": true,
+      "realPrice": true,
+      "executedVia": "Paper (Jupiter simulation)",
+      "createdAt": 1748713832812,
+      "updatedAt": 1748713832812,
+      "status": "ACTIVE",
+      "totalPnL": 0,
+      "sellOrders": [],
+      "currentPrice": 0.000005858850678636533,
+      "currentValue": 0.1,
+      "unrealizedPnL": 0,
+      "totalCurrentPnL": 0,
+      "lastPriceUpdate": 1748713832812,
+      "priceHistory": [
+        {
+          "timestamp": 1748713832812,
+          "price": 0.000005858850678636533,
+          "source": "entry"
+        }
+      ]
+    }
+  },
+  "closed": {},
+  "lastSaved": "2025-05-31T17:50:32.812Z",
+  "priceUpdateStats": {
+    "totalUpdates": 0,
+    "batchUpdates": 0,
+    "criticalUpdates": 0,
+    "normalUpdates": 0,
+    "slowUpdates": 0,
+    "successfulUpdates": 0,
+    "failedUpdates": 0,
+    "avgBatchSize": 0,
+    "avgUpdateTime": 0,
+    "totalUpdateTime": 0,
+    "rpcCallsSaved": 0,
+    "lastUpdateTime": 0,
+    "updateErrors": [],
+    "priceChangesDetected": 0
+  }
+}
