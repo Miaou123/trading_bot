@@ -1,9 +1,9 @@
-// src/app.js - Simplified Trading Bot (Likes/Views Only)
+// src/app.js - Fixed to use Enhanced PositionManager with Fast Price Updates
 require('dotenv').config();
 const logger = require('./utils/logger');
 const TradingBot = require('./bot/tradingBot');
 const WebhookListener = require('./listeners/webhookListener');
-const PositionManager = require('./bot/positionManager');
+const PositionManager = require('./bot/positionManager'); // Enhanced version
 
 class SimplifiedTradingApp {
     constructor() {
@@ -12,7 +12,11 @@ class SimplifiedTradingApp {
             tradingEnabled: process.env.TRADING_ENABLED === 'true',
             initialInvestment: parseFloat(process.env.INITIAL_INVESTMENT_SOL) || 0.1,
             maxConcurrentPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS) || 5,
-            positionCheckInterval: parseInt(process.env.POSITION_CHECK_INTERVAL) || 30000,
+            
+            // 🔥 ENHANCED: Fast price update configuration
+            fastUpdateInterval: 500,     // 500ms for critical positions
+            normalUpdateInterval: 1000, // 1s for normal positions
+            slowUpdateInterval: 5000,   // 5s for stable positions
             
             // Webhook configuration
             webhookPort: parseInt(process.env.WEBHOOK_PORT) || 3001,
@@ -51,11 +55,11 @@ class SimplifiedTradingApp {
         }
 
         try {
-            logger.info('🚀 Starting Simplified Trading Bot...');
+            logger.info('🚀 Starting Enhanced Trading Bot...');
             logger.info(`📊 Mode: ${this.config.tradingMode.toUpperCase()}`);
             logger.info(`💰 Initial Investment: ${this.config.initialInvestment} SOL`);
             logger.info(`🎯 SIMPLIFIED: Only checking likes (${this.config.minTwitterLikes}+) and views (${this.config.minTwitterViews}+)`);
-            logger.info(`⚡ NO RISK ASSESSMENT - Buying all qualified tokens!`);
+            logger.info(`⚡ ENHANCED: Fast price updates enabled!`);
             this.startTime = Date.now();
 
             // Validate configuration
@@ -64,11 +68,8 @@ class SimplifiedTradingApp {
             // Initialize components
             await this.initializeComponents();
 
-            // Start position monitoring
-            this.startPositionMonitoring();
-
             this.isRunning = true;
-            logger.info('✅ Simplified trading bot started successfully');
+            logger.info('✅ Enhanced trading bot started successfully');
             
             if (this.config.tradingMode === 'paper') {
                 logger.info('📝 Running in PAPER TRADING mode - no real trades will be executed');
@@ -106,12 +107,20 @@ class SimplifiedTradingApp {
     }
 
     async initializeComponents() {
-        logger.info('🔧 Initializing trading components...');
+        logger.info('🔧 Initializing enhanced trading components...');
 
-        // Initialize Position Manager
+        // 🔥 ENHANCED: Initialize Position Manager with fast price updates
         this.positionManager = new PositionManager({
             tradingMode: this.config.tradingMode,
-            maxPositions: this.config.maxConcurrentPositions
+            maxPositions: this.config.maxConcurrentPositions,
+            // Fast price update configuration
+            fastUpdateInterval: this.config.fastUpdateInterval,
+            normalUpdateInterval: this.config.normalUpdateInterval,
+            slowUpdateInterval: this.config.slowUpdateInterval,
+            batchUpdateSize: 10,
+            maxConcurrentBatches: 3,
+            criticalDistanceThreshold: 0.05, // 5% from stop/take profit
+            normalDistanceThreshold: 0.15    // 15% from stop/take profit
         });
 
         // Initialize Trading Bot
@@ -120,6 +129,10 @@ class SimplifiedTradingApp {
             positionManager: this.positionManager,
             initialInvestment: this.config.initialInvestment
         });
+
+        // 🔥 CRITICAL: Connect PositionManager to TradingBot for price discovery
+        this.positionManager.setTradingBot(this.tradingBot);
+        logger.info('🔗 PositionManager connected to TradingBot for fast price updates');
 
         // Initialize Webhook Listener
         logger.info('⚡ Initializing webhook listener...');
@@ -137,14 +150,31 @@ class SimplifiedTradingApp {
         // Start webhook server
         await this.webhookListener.start();
 
-        logger.info('✅ All components initialized');
+        logger.info('✅ All enhanced components initialized');
     }
 
     setupEventHandlers() {
         // Trading Bot Events
         this.tradingBot.on('tradeExecuted', (tradeData) => {
             this.metrics.tradesExecuted++;
-            logger.info(`💰 Trade executed: ${tradeData.type} ${tradeData.amount} ${tradeData.symbol} (${tradeData.investmentAmount} SOL)`);
+            logger.info(`💰 Trade executed: ${tradeData.type} ${tradeData.amount} ${tradeData.symbol}`);
+        });
+
+        this.tradingBot.on('positionClosed', (positionData) => {
+            if (positionData.pnl > 0) {
+                this.metrics.profitableTrades++;
+            }
+            this.metrics.totalPnL += positionData.pnl;
+            logger.info(`📊 Position closed: ${positionData.symbol} PnL: ${positionData.pnl} SOL`);
+        });
+
+        // 🔥 ENHANCED: Position Manager Events
+        this.positionManager.on('positionAdded', (position) => {
+            logger.info(`📈 Position added to fast price monitoring: ${position.symbol}`);
+        });
+
+        this.positionManager.on('positionClosed', (position) => {
+            logger.info(`📉 Position removed from fast price monitoring: ${position.symbol}`);
         });
 
         // Webhook Listener Events
@@ -196,9 +226,7 @@ class SimplifiedTradingApp {
 
         // Error handling for other components
         this.tradingBot.on('error', this.handleError.bind(this));
-        if (this.positionManager) {
-            this.positionManager.on('error', this.handleError.bind(this));
-        }
+        this.positionManager.on('error', this.handleError.bind(this));
     }
 
     // Helper methods for alert qualification
@@ -219,27 +247,25 @@ class SimplifiedTradingApp {
     }
 
     logIntegrationStatus() {
-        logger.info('📡 Simplified Alert Integration:');
+        logger.info('📡 Enhanced Alert Integration:');
         logger.info(`   ⚡ WEBHOOK: Port ${this.config.webhookPort} (5-20ms latency)`);
         logger.info(`   📡 Endpoint: http://localhost:${this.config.webhookPort}/webhook/alert`);
         logger.info(`   🎯 Strategy: Buy all tokens with ${this.config.minTwitterLikes}+ likes and ${this.config.minTwitterViews}+ views`);
+        logger.info(`   🚀 FAST PRICE UPDATES: Critical=500ms, Normal=1s, Stable=5s`);
         logger.info(`   📊 Expected: Multiple alerts per hour, each potentially triggering trades`);
         logger.info(`   🚫 NO RISK FILTERING: Bundle detection, whale analysis, etc. are IGNORED`);
-    }
-
-    startPositionMonitoring() {
+        
+        // Log price update system status
         if (this.positionManager) {
-            setInterval(async () => {
-                try {
-                    await this.positionManager.updateAllPositions();
-                } catch (error) {
-                    logger.error('Error updating positions:', error);
-                }
-            }, this.config.positionCheckInterval);
-
-            logger.info(`📊 Position monitoring started (${this.config.positionCheckInterval / 1000}s intervals)`);
+            const stats = this.positionManager.getPerformanceStats();
+            if (stats.queueSizes) {
+                logger.info(`   📊 Position Queues: Critical=${stats.queueSizes.critical}, Normal=${stats.queueSizes.normal}, Slow=${stats.queueSizes.slow}`);
+            }
         }
     }
+
+    // 🔥 REMOVED: Old position monitoring (now handled by enhanced PositionManager)
+    // The enhanced PositionManager automatically starts its own fast price update system
 
     handleError(error) {
         logger.error('Trading bot error:', error);
@@ -247,7 +273,9 @@ class SimplifiedTradingApp {
         // Handle critical errors
         if (this.isCriticalError(error)) {
             logger.error('🚨 Critical error detected, stopping trading operations');
-            this.tradingBot.pauseTrading();
+            if (this.tradingBot && typeof this.tradingBot.pauseTrading === 'function') {
+                this.tradingBot.pauseTrading();
+            }
         }
     }
 
@@ -267,12 +295,15 @@ class SimplifiedTradingApp {
     getStatus() {
         const uptime = Date.now() - this.startTime;
         const webhookStats = this.webhookListener ? this.webhookListener.getStats() : {};
+        const positionStats = this.positionManager ? this.positionManager.getPerformanceStats() : {};
         
         return {
             isRunning: this.isRunning,
             mode: this.config.tradingMode,
             uptime: this.formatUptime(uptime),
             simplified: true,
+            enhanced: true, // 🔥 NEW
+            fastPriceUpdates: true, // 🔥 NEW
             riskAssessment: false,
             
             metrics: {
@@ -286,7 +317,16 @@ class SimplifiedTradingApp {
             },
             
             positions: this.positionManager ? this.positionManager.getActivePositionsCount() : 0,
-            tradingEnabled: this.tradingBot ? this.tradingBot.isTradingEnabledStatus() : false,
+            tradingEnabled: this.tradingBot ? (this.tradingBot.isTradingEnabledStatus ? this.tradingBot.isTradingEnabledStatus() : true) : false,
+            
+            // 🔥 ENHANCED: Position management stats
+            positionManagement: positionStats.queueSizes ? {
+                criticalPositions: positionStats.queueSizes.critical,
+                normalPositions: positionStats.queueSizes.normal,
+                slowPositions: positionStats.queueSizes.slow,
+                totalInQueues: positionStats.queueSizes.total,
+                priceUpdateStats: positionStats.priceUpdateStats
+            } : { status: 'initializing' },
             
             webhook: {
                 enabled: true,
@@ -303,6 +343,15 @@ class SimplifiedTradingApp {
                 riskFiltering: false,
                 bundleFiltering: false,
                 whaleFiltering: false
+            },
+            
+            // 🔥 NEW: Fast price update configuration
+            priceUpdates: {
+                criticalInterval: this.config.fastUpdateInterval + 'ms',
+                normalInterval: this.config.normalUpdateInterval + 'ms',
+                slowInterval: this.config.slowUpdateInterval + 'ms',
+                batchProcessing: true,
+                manualPriceCalculation: true
             }
         };
     }
@@ -321,6 +370,10 @@ class SimplifiedTradingApp {
 
     setupShutdownHandlers() {
         const signals = ['SIGTERM', 'SIGINT', 'SIGUSR2'];
+        
+        // Only set up handlers once
+        if (this._shutdownHandlersSet) return;
+        this._shutdownHandlersSet = true;
         
         signals.forEach(signal => {
             process.on(signal, () => {
@@ -346,16 +399,16 @@ class SimplifiedTradingApp {
             return;
         }
 
-        logger.info('🛑 Shutting down simplified trading bot...');
+        logger.info('🛑 Shutting down enhanced trading bot...');
         
         try {
             // Pause trading first
-            if (this.tradingBot) {
+            if (this.tradingBot && typeof this.tradingBot.pauseTrading === 'function') {
                 this.tradingBot.pauseTrading();
             }
 
             // Save current positions
-            if (this.positionManager) {
+            if (this.positionManager && typeof this.positionManager.savePositions === 'function') {
                 await this.positionManager.savePositions();
             }
 
@@ -383,11 +436,11 @@ class SimplifiedTradingApp {
                 await this.webhookListener.stop();
             }
             
-            if (this.tradingBot) {
+            if (this.tradingBot && typeof this.tradingBot.stop === 'function') {
                 await this.tradingBot.stop();
             }
 
-            logger.info('🛑 Simplified trading bot stopped');
+            logger.info('🛑 Enhanced trading bot stopped');
             
         } catch (error) {
             logger.error('Error stopping trading bot:', error);
@@ -404,7 +457,7 @@ if (require.main === module) {
     const app = new SimplifiedTradingApp();
     
     app.start().catch(error => {
-        logger.error('Failed to start simplified trading bot:', error);
+        logger.error('Failed to start enhanced trading bot:', error);
         process.exit(1);
     });
 }

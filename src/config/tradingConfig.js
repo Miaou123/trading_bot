@@ -1,4 +1,4 @@
-// src/config/tradingConfig.js - Complete trading bot configuration
+// src/config/tradingConfig.js - Simple trading bot configuration focused on PumpSwap SDK
 require('dotenv').config();
 
 const tradingConfig = {
@@ -66,7 +66,6 @@ const tradingConfig = {
     // Wallet Configuration
     wallet: {
         privateKey: process.env.PRIVATE_KEY,
-        // Add support for private key file as alternative
         privateKeyFile: process.env.PRIVATE_KEY_FILE
     },
 
@@ -119,7 +118,7 @@ const tradingConfig = {
     }
 };
 
-// Configuration validation
+// Simple configuration validation
 function validateConfig() {
     const errors = [];
     const warnings = [];
