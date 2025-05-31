@@ -1,12 +1,11 @@
-// src/app.js - Ultra-Fast Webhook-Only Trading Bot
+// src/app.js - Simplified Trading Bot (Likes/Views Only)
 require('dotenv').config();
 const logger = require('./utils/logger');
 const TradingBot = require('./bot/tradingBot');
-const WebhookListener = require('./listeners/webhookListener'); // ⚡ ULTRA-FAST webhook alerts
+const WebhookListener = require('./listeners/webhookListener');
 const PositionManager = require('./bot/positionManager');
-const RiskManager = require('./bot/riskManager');
 
-class PumpTradingApp {
+class SimplifiedTradingApp {
     constructor() {
         this.config = {
             tradingMode: process.env.TRADING_MODE || 'paper',
@@ -15,15 +14,18 @@ class PumpTradingApp {
             maxConcurrentPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS) || 5,
             positionCheckInterval: parseInt(process.env.POSITION_CHECK_INTERVAL) || 30000,
             
-            // ⚡ Webhook configuration (ONLY source of alerts)
+            // Webhook configuration
             webhookPort: parseInt(process.env.WEBHOOK_PORT) || 3001,
-            webhookApiKey: process.env.TRADING_BOT_API_KEY || 'your-secret-key'
+            webhookApiKey: process.env.TRADING_BOT_API_KEY || 'your-secret-key',
+            
+            // Simplified qualification thresholds
+            minTwitterLikes: parseInt(process.env.MIN_TWITTER_LIKES) || 100,
+            minTwitterViews: parseInt(process.env.MIN_TWITTER_VIEWS) || 50000
         };
 
         this.tradingBot = null;
-        this.webhookListener = null; // ⚡ ONLY alert source
+        this.webhookListener = null;
         this.positionManager = null;
-        this.riskManager = null;
         this.isRunning = false;
         this.startTime = null;
         
@@ -49,10 +51,11 @@ class PumpTradingApp {
         }
 
         try {
-            logger.info('🚀 Starting Ultra-Fast Webhook Trading Bot...');
+            logger.info('🚀 Starting Simplified Trading Bot...');
             logger.info(`📊 Mode: ${this.config.tradingMode.toUpperCase()}`);
             logger.info(`💰 Initial Investment: ${this.config.initialInvestment} SOL`);
-            logger.info(`⚡ Alert Source: WEBHOOK ONLY (5-20ms latency)`);
+            logger.info(`🎯 SIMPLIFIED: Only checking likes (${this.config.minTwitterLikes}+) and views (${this.config.minTwitterViews}+)`);
+            logger.info(`⚡ NO RISK ASSESSMENT - Buying all qualified tokens!`);
             this.startTime = Date.now();
 
             // Validate configuration
@@ -61,11 +64,11 @@ class PumpTradingApp {
             // Initialize components
             await this.initializeComponents();
 
-            // Start monitoring
+            // Start position monitoring
             this.startPositionMonitoring();
 
             this.isRunning = true;
-            logger.info('✅ Ultra-fast trading bot started successfully');
+            logger.info('✅ Simplified trading bot started successfully');
             
             if (this.config.tradingMode === 'paper') {
                 logger.info('📝 Running in PAPER TRADING mode - no real trades will be executed');
@@ -84,18 +87,6 @@ class PumpTradingApp {
 
     async validateConfiguration() {
         logger.info('🔍 Validating configuration...');
-
-        // Required environment variables
-        const required = [
-            'SOLANA_RPC_URL',
-            'PRIVATE_KEY'
-        ];
-
-        for (const env of required) {
-            if (!process.env[env]) {
-                throw new Error(`Missing required environment variable: ${env}`);
-            }
-        }
 
         // Webhook validation
         if (!this.config.webhookApiKey || this.config.webhookApiKey === 'your-secret-key') {
@@ -117,35 +108,26 @@ class PumpTradingApp {
     async initializeComponents() {
         logger.info('🔧 Initializing trading components...');
 
-        // Initialize Risk Manager first
-        this.riskManager = new RiskManager({
-            maxConcurrentPositions: this.config.maxConcurrentPositions,
-            maxDailyLosses: parseFloat(process.env.MAX_DAILY_LOSSES_SOL) || 1.0,
-            blacklistBundleDetected: process.env.BLACKLIST_BUNDLE_DETECTED === 'true',
-            blacklistHighRisk: process.env.BLACKLIST_HIGH_RISK === 'true'
-        });
-
         // Initialize Position Manager
         this.positionManager = new PositionManager({
             tradingMode: this.config.tradingMode,
-            riskManager: this.riskManager
+            maxPositions: this.config.maxConcurrentPositions
         });
 
         // Initialize Trading Bot
         this.tradingBot = new TradingBot({
             tradingMode: this.config.tradingMode,
             positionManager: this.positionManager,
-            riskManager: this.riskManager,
             initialInvestment: this.config.initialInvestment
         });
 
-        // ⚡ Initialize Ultra-Fast Webhook Listener (ONLY alert source)
-        logger.info('⚡ Initializing ultra-fast webhook listener...');
+        // Initialize Webhook Listener
+        logger.info('⚡ Initializing webhook listener...');
         this.webhookListener = new WebhookListener({
             port: this.config.webhookPort,
             apiKey: this.config.webhookApiKey,
             enableCors: true,
-            rateLimit: 50, // 50 requests/minute is plenty for ~1 alert/hour
+            rateLimit: 50,
             logRequests: process.env.NODE_ENV === 'development'
         });
 
@@ -162,28 +144,21 @@ class PumpTradingApp {
         // Trading Bot Events
         this.tradingBot.on('tradeExecuted', (tradeData) => {
             this.metrics.tradesExecuted++;
-            logger.info(`💰 Trade executed: ${tradeData.type} ${tradeData.amount} ${tradeData.symbol}`);
+            logger.info(`💰 Trade executed: ${tradeData.type} ${tradeData.amount} ${tradeData.symbol} (${tradeData.investmentAmount} SOL)`);
         });
 
-        this.tradingBot.on('positionClosed', (positionData) => {
-            if (positionData.pnl > 0) {
-                this.metrics.profitableTrades++;
-            }
-            this.metrics.totalPnL += positionData.pnl;
-            logger.info(`📊 Position closed: ${positionData.symbol} PnL: ${positionData.pnl} SOL`);
-        });
-
-        // ⚡ Webhook Listener Events (ONLY alert source)
+        // Webhook Listener Events
         this.webhookListener.on('alertReceived', (alert) => {
             this.metrics.alertsReceived++;
-            logger.info(`⚡ Alert received: ${alert.token.symbol} (${alert.confidence || 'UNKNOWN'}) - ${alert.twitter.likes} likes, ${alert.twitter.views} views`);
+            logger.info(`⚡ Alert received: ${alert.token.symbol} - ${alert.twitter.likes} likes, ${alert.twitter.views || 0} views`);
         });
 
         this.webhookListener.on('qualifiedAlert', async (alert) => {
             this.metrics.alertsQualified++;
-            logger.info(`🚀 QUALIFIED: ${alert.token.symbol} - ${alert.twitter.likes} likes, ${alert.analysis.riskLevel} risk`);
+            logger.info(`🚀 QUALIFIED: ${alert.token.symbol} - ${alert.twitter.likes} likes, ${alert.twitter.views || 0} views`);
+            logger.info(`💰 Proceeding with purchase (no risk checks)`);
             
-            // ⚡ Process immediately through trading bot
+            // Process immediately through trading bot
             try {
                 const processingStart = Date.now();
                 await this.tradingBot.processAlert(alert);
@@ -221,52 +196,49 @@ class PumpTradingApp {
 
         // Error handling for other components
         this.tradingBot.on('error', this.handleError.bind(this));
-        this.positionManager.on('error', this.handleError.bind(this));
-        this.riskManager.on('error', this.handleError.bind(this));
+        if (this.positionManager) {
+            this.positionManager.on('error', this.handleError.bind(this));
+        }
     }
 
-    // Helper methods for alert qualification (duplicated from webhook listener for metrics)
+    // Helper methods for alert qualification
     isQualifiedAlert(alert) {
-        const minLikes = parseInt(process.env.MIN_TWITTER_LIKES) || 100;
-        const minViews = parseInt(process.env.MIN_TWITTER_VIEWS) || 50000;
-        
-        if (alert.twitter.likes < minLikes) return false;
-        if (alert.twitter.views > 0 && alert.twitter.views < minViews) return false;
-        if (process.env.BLACKLIST_BUNDLE_DETECTED === 'true' && alert.analysis.bundleDetected) return false;
-        if (process.env.BLACKLIST_HIGH_RISK === 'true' && alert.analysis.riskLevel === 'HIGH') return false;
-        
+        if (alert.twitter.likes < this.config.minTwitterLikes) return false;
+        if (alert.twitter.views > 0 && alert.twitter.views < this.config.minTwitterViews) return false;
         return true;
     }
 
     getSkipReason(alert) {
-        const minLikes = parseInt(process.env.MIN_TWITTER_LIKES) || 100;
-        const minViews = parseInt(process.env.MIN_TWITTER_VIEWS) || 50000;
-        
-        if (alert.twitter.likes < minLikes) return `Likes too low: ${alert.twitter.likes} < ${minLikes}`;
-        if (alert.twitter.views > 0 && alert.twitter.views < minViews) return `Views too low: ${alert.twitter.views} < ${minViews}`;
-        if (alert.analysis.bundleDetected && process.env.BLACKLIST_BUNDLE_DETECTED === 'true') return 'Bundle detected';
-        if (alert.analysis.riskLevel === 'HIGH' && process.env.BLACKLIST_HIGH_RISK === 'true') return 'High risk';
+        if (alert.twitter.likes < this.config.minTwitterLikes) {
+            return `Likes too low: ${alert.twitter.likes} < ${this.config.minTwitterLikes}`;
+        }
+        if (alert.twitter.views > 0 && alert.twitter.views < this.config.minTwitterViews) {
+            return `Views too low: ${alert.twitter.views} < ${this.config.minTwitterViews}`;
+        }
         return 'Unknown reason';
     }
 
     logIntegrationStatus() {
-        logger.info('📡 Ultra-Fast Alert Integration:');
-        logger.info(`   ⚡ WEBHOOK ONLY: Port ${this.config.webhookPort} (5-20ms latency)`);
+        logger.info('📡 Simplified Alert Integration:');
+        logger.info(`   ⚡ WEBHOOK: Port ${this.config.webhookPort} (5-20ms latency)`);
         logger.info(`   📡 Endpoint: http://localhost:${this.config.webhookPort}/webhook/alert`);
-        logger.info(`   🎯 Strategy: Maximum speed, no fallbacks needed`);
-        logger.info(`   📊 Expected: ~1 alert per hour`);
+        logger.info(`   🎯 Strategy: Buy all tokens with ${this.config.minTwitterLikes}+ likes and ${this.config.minTwitterViews}+ views`);
+        logger.info(`   📊 Expected: Multiple alerts per hour, each potentially triggering trades`);
+        logger.info(`   🚫 NO RISK FILTERING: Bundle detection, whale analysis, etc. are IGNORED`);
     }
 
     startPositionMonitoring() {
-        setInterval(async () => {
-            try {
-                await this.positionManager.updateAllPositions();
-            } catch (error) {
-                logger.error('Error updating positions:', error);
-            }
-        }, this.config.positionCheckInterval);
+        if (this.positionManager) {
+            setInterval(async () => {
+                try {
+                    await this.positionManager.updateAllPositions();
+                } catch (error) {
+                    logger.error('Error updating positions:', error);
+                }
+            }, this.config.positionCheckInterval);
 
-        logger.info(`📊 Position monitoring started (${this.config.positionCheckInterval / 1000}s intervals)`);
+            logger.info(`📊 Position monitoring started (${this.config.positionCheckInterval / 1000}s intervals)`);
+        }
     }
 
     handleError(error) {
@@ -300,6 +272,8 @@ class PumpTradingApp {
             isRunning: this.isRunning,
             mode: this.config.tradingMode,
             uptime: this.formatUptime(uptime),
+            simplified: true,
+            riskAssessment: false,
             
             metrics: {
                 ...this.metrics,
@@ -312,7 +286,7 @@ class PumpTradingApp {
             },
             
             positions: this.positionManager ? this.positionManager.getActivePositionsCount() : 0,
-            tradingEnabled: this.tradingBot ? this.tradingBot.isTradingEnabled() : false,
+            tradingEnabled: this.tradingBot ? this.tradingBot.isTradingEnabledStatus() : false,
             
             webhook: {
                 enabled: true,
@@ -320,22 +294,16 @@ class PumpTradingApp {
                 port: this.config.webhookPort,
                 alertsProcessed: webhookStats.alertsProcessed || 0,
                 successRate: webhookStats.successRate || '0%',
-                averageLatency: Math.round(webhookStats.avgProcessingTime || 0) + 'ms',
-                fastestAlert: webhookStats.fastestAlert || 0,
-                slowestAlert: webhookStats.slowestAlert || 0
+                averageLatency: Math.round(webhookStats.avgProcessingTime || 0) + 'ms'
+            },
+            
+            qualification: {
+                minLikes: this.config.minTwitterLikes,
+                minViews: this.config.minTwitterViews,
+                riskFiltering: false,
+                bundleFiltering: false,
+                whaleFiltering: false
             }
-        };
-    }
-
-    getDetailedStats() {
-        const status = this.getStatus();
-        const webhookStats = this.webhookListener ? this.webhookListener.getStats() : {};
-        
-        return {
-            ...status,
-            detailedWebhookStats: webhookStats,
-            riskManagerStats: this.riskManager ? this.riskManager.getStats() : {},
-            positionManagerStats: this.positionManager ? this.positionManager.getPerformanceStats() : {}
         };
     }
 
@@ -378,7 +346,7 @@ class PumpTradingApp {
             return;
         }
 
-        logger.info('🛑 Shutting down ultra-fast trading bot...');
+        logger.info('🛑 Shutting down simplified trading bot...');
         
         try {
             // Pause trading first
@@ -419,7 +387,7 @@ class PumpTradingApp {
                 await this.tradingBot.stop();
             }
 
-            logger.info('🛑 Ultra-fast trading bot stopped');
+            logger.info('🛑 Simplified trading bot stopped');
             
         } catch (error) {
             logger.error('Error stopping trading bot:', error);
@@ -429,14 +397,14 @@ class PumpTradingApp {
 }
 
 // Export for use as module
-module.exports = PumpTradingApp;
+module.exports = SimplifiedTradingApp;
 
 // Run as standalone application if called directly
 if (require.main === module) {
-    const app = new PumpTradingApp();
+    const app = new SimplifiedTradingApp();
     
     app.start().catch(error => {
-        logger.error('Failed to start ultra-fast trading bot:', error);
+        logger.error('Failed to start simplified trading bot:', error);
         process.exit(1);
     });
 }

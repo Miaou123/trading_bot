@@ -1,4 +1,4 @@
-// src/listeners/webhookListener.js - Fixed version with safer Express routes
+// src/listeners/webhookListener.js - Simplified version (likes/views only)
 const express = require('express');
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
@@ -281,10 +281,8 @@ class WebhookListener extends EventEmitter {
                     url: 'https://twitter.com/test'
                 },
                 analysis: {
-                    bundleDetected: Math.random() > 0.7,
-                    riskLevel: ['LOW', 'MEDIUM', 'HIGH'][Math.floor(Math.random() * 3)]
-                },
-                confidence: ['LOW', 'MEDIUM', 'HIGH'][Math.floor(Math.random() * 3)]
+                    bundleDetected: Math.random() > 0.7
+                }
             };
 
             this.processAlert(testAlert, { source: 'test' });
@@ -298,7 +296,7 @@ class WebhookListener extends EventEmitter {
             logger.info(`🧪 Test alert processed: ${testAlert.token.symbol}`);
         });
 
-        // Catch-all for undefined routes - FIXED: Use simple string instead of complex pattern
+        // Catch-all for undefined routes
         this.app.use('*', (req, res) => {
             res.status(404).json({
                 error: 'Endpoint not found',
@@ -369,7 +367,7 @@ class WebhookListener extends EventEmitter {
                 this.stats.alertsQualified++;
                 this.emit('qualifiedAlert', enhancedAlert);
                 
-                logger.info(`✅ QUALIFIED: ${alert.token.symbol} - ${alert.twitter.likes} likes`);
+                logger.info(`✅ QUALIFIED: ${alert.token.symbol} - ${alert.twitter.likes} likes, ${alert.twitter.views || 0} views`);
                 return { qualified: true, action: 'FORWARDED_TO_TRADING_BOT' };
             } else {
                 this.stats.alertsSkipped++;
@@ -385,16 +383,19 @@ class WebhookListener extends EventEmitter {
         }
     }
 
+    // 🚀 SIMPLIFIED: Only check likes and views
     isQualifiedAlert(alert) {
         const minLikes = parseInt(process.env.MIN_TWITTER_LIKES) || 100;
         const minViews = parseInt(process.env.MIN_TWITTER_VIEWS) || 50000;
         
+        // Simple qualification: just likes and views
         if (alert.twitter.likes < minLikes) return false;
         if (alert.twitter.views > 0 && alert.twitter.views < minViews) return false;
         
         return true;
     }
 
+    // 🚀 SIMPLIFIED: Only check likes and views for skip reason
     getSkipReason(alert) {
         const minLikes = parseInt(process.env.MIN_TWITTER_LIKES) || 100;
         const minViews = parseInt(process.env.MIN_TWITTER_VIEWS) || 50000;
@@ -440,6 +441,7 @@ class WebhookListener extends EventEmitter {
                     logger.info(`🚀 Webhook server listening on port ${this.config.port}`);
                     logger.info(`📡 Alert endpoint: http://localhost:${this.config.port}/webhook/alert`);
                     logger.info(`❤️ Health check: http://localhost:${this.config.port}/health`);
+                    logger.info(`🎯 SIMPLIFIED: Only checking likes/views (no risk scoring)`);
                     
                     resolve();
                 }

@@ -1,379 +1,102 @@
 {
   "active": {
-    "pos_1748635013077_071k3c527": {
-      "id": "pos_1748635013077_071k3c527",
-      "tokenAddress": "PUMP123ExampleTokenAddress456789",
-      "symbol": "PUMP",
+    "pos_1748687590717_l7u58kx4w": {
+      "id": "pos_1748687590717_l7u58kx4w",
+      "tokenAddress": "HEgD31JKYNrGro696WfAdAkLdbiVMnNrVnDBWvXCpump",
+      "symbol": "TEST497",
       "side": "LONG",
-      "entryPrice": 0.00047584615870284523,
-      "quantity": "21.015195388484297",
-      "investedAmount": 0.01,
-      "entryTime": 1748635013077,
-      "txHash": "PAPER_TRADE_1748635013077",
-      "stopLoss": 0.005,
+      "entryPrice": 2.075e-8,
+      "quantity": "503614.45783132536",
+      "investedAmount": 0.011000000000000001,
+      "entryTime": 1748687590717,
+      "txHash": "PAPER_TRADE_1748687590717",
+      "stopLoss": 0.0055000000000000005,
       "takeProfitLevels": [
         {
-          "targetValue": 0.02,
+          "targetValue": 0.022000000000000002,
           "sellPercentage": 50,
           "triggered": false
         },
         {
-          "targetValue": 0.04,
+          "targetValue": 0.044000000000000004,
           "sellPercentage": 25,
+          "triggered": false
+        },
+        {
+          "targetValue": 0.11000000000000001,
+          "sellPercentage": 100,
           "triggered": false
         }
       ],
-      "remainingQuantity": "21.015195388484297",
+      "remainingQuantity": "503614.45783132536",
       "alert": {
+        "source": "scanner_bot_test",
+        "version": "1.0",
+        "timestamp": 1748687590341,
+        "operationId": "test_TEST497_1748687590341",
         "token": {
-          "address": "PUMP123ExampleTokenAddress456789",
-          "symbol": "PUMP",
-          "name": "PumpFun Test Token"
+          "address": "HEgD31JKYNrGro696WfAdAkLdbiVMnNrVnDBWvXCpump",
+          "symbol": "TEST497",
+          "name": "Test Token 726",
+          "eventType": "migration",
+          "creator": "test_creator_srnbwvzg3"
         },
         "twitter": {
-          "likes": 500,
-          "views": 150000,
-          "url": "https://twitter.com/test"
+          "likes": 473,
+          "views": 542081,
+          "url": "https://x.com/pumpdotfun/status/1926000000000000000",
+          "publishedAt": "2025-05-30T13:21:03.892Z"
         },
         "analysis": {
           "bundleDetected": false,
-          "riskLevel": "LOW"
+          "bundlePercentage": 0.7077528584714265,
+          "bundleHoldingPercentage": 13.880103503660306,
+          "bundleCount": 11,
+          "whaleCount": 8,
+          "freshWalletCount": 11,
+          "top5Concentration": 73.38245160453467,
+          "top10Concentration": 80.41176417546679
         },
-        "confidence": "HIGH",
+        "performance": {
+          "analysisSuccess": true,
+          "analysisErrors": [],
+          "successfulAnalyses": 2,
+          "totalAnalyses": 2,
+          "processingTime": 35396
+        },
         "metadata": {
-          "receivedAt": 1748635013071,
-          "source": "manual-test",
+          "receivedAt": 1748687590356,
+          "source": "test-migration-generator",
           "ip": "::1"
         }
       },
       "paperTrade": true,
-      "createdAt": 1748635013077,
-      "updatedAt": 1748685695568,
+      "priceSource": "DEXSCREENER",
+      "slippageApplied": 5,
+      "createdAt": 1748687590717,
+      "updatedAt": 1748687590717,
       "status": "ACTIVE",
       "totalPnL": 0,
       "sellOrders": [],
-      "currentPrice": 0.0006968185552863294,
-      "currentValue": 0.01464377808966356,
-      "unrealizedPnL": 0.004643778089663559,
-      "totalCurrentPnL": 0.004643778089663559,
-      "lastPriceUpdate": 1748685695568,
-      "priceChange": 46.437780896635594,
-      "valueChange": 46.43778089663559,
+      "currentPrice": 2.075e-8,
+      "currentValue": 0.011000000000000001,
+      "unrealizedPnL": 0,
+      "totalCurrentPnL": 0,
+      "lastPriceUpdate": 1748687590717,
       "priceHistory": [
         {
-          "timestamp": 1748684170707,
-          "price": 0.00047584615870284523,
-          "source": "update",
-          "pnl": 0
-        },
-        {
-          "timestamp": 1748684200705,
-          "price": 0.0004964930382247202,
-          "source": "update",
-          "pnl": 0.00043389820731469866
-        },
-        {
-          "timestamp": 1748684230706,
-          "price": 0.000499614387841086,
-          "source": "update",
-          "pnl": 0.0004994939793783945
-        },
-        {
-          "timestamp": 1748684260707,
-          "price": 0.000517379071083771,
-          "source": "update",
-          "pnl": 0.0008728222687379543
-        },
-        {
-          "timestamp": 1748684290707,
-          "price": 0.0005437486509421415,
-          "source": "update",
-          "pnl": 0.0014269841417738488
-        },
-        {
-          "timestamp": 1748684320709,
-          "price": 0.0005399489836639659,
-          "source": "update",
-          "pnl": 0.0013471333915117591
-        },
-        {
-          "timestamp": 1748684350709,
-          "price": 0.0005505272081624666,
-          "source": "update",
-          "pnl": 0.0015694368462110028
-        },
-        {
-          "timestamp": 1748684380710,
-          "price": 0.0005582155127737861,
-          "source": "update",
-          "pnl": 0.0017310080698240676
-        },
-        {
-          "timestamp": 1748684410710,
-          "price": 0.0005712182951095692,
-          "source": "update",
-          "pnl": 0.002004264081204481
-        },
-        {
-          "timestamp": 1748684440711,
-          "price": 0.0005735136605736119,
-          "source": "update",
-          "pnl": 0.0020525016349193168
-        },
-        {
-          "timestamp": 1748684470712,
-          "price": 0.0005986822363088439,
-          "source": "update",
-          "pnl": 0.0025814241716450824
-        },
-        {
-          "timestamp": 1748684500712,
-          "price": 0.0005930628795370894,
-          "source": "update",
-          "pnl": 0.0024633322911290605
-        },
-        {
-          "timestamp": 1748684530712,
-          "price": 0.0006010348297204621,
-          "source": "update",
-          "pnl": 0.0026308643818598997
-        },
-        {
-          "timestamp": 1748684560713,
-          "price": 0.0005832574362702898,
-          "source": "update",
-          "pnl": 0.0022572689850065674
-        },
-        {
-          "timestamp": 1748684590713,
-          "price": 0.000581752567340887,
-          "source": "update",
-          "pnl": 0.0022256438704211096
-        },
-        {
-          "timestamp": 1748684620713,
-          "price": 0.0006069662194716235,
-          "source": "update",
-          "pnl": 0.002755513696405811
-        },
-        {
-          "timestamp": 1748684675553,
-          "price": 0.0006256521691034668,
-          "source": "update",
-          "pnl": 0.003148202578938372
-        },
-        {
-          "timestamp": 1748684705552,
-          "price": 0.0006058359635125831,
-          "source": "update",
-          "pnl": 0.0027317611465875764
-        },
-        {
-          "timestamp": 1748684735553,
-          "price": 0.000635630642361528,
-          "source": "update",
-          "pnl": 0.003357902144135295
-        },
-        {
-          "timestamp": 1748684765554,
-          "price": 0.0006270397860787378,
-          "source": "update",
-          "pnl": 0.0031773636207980717
-        },
-        {
-          "timestamp": 1748684795554,
-          "price": 0.0006129798534450046,
-          "source": "update",
-          "pnl": 0.0028818913893512415
-        },
-        {
-          "timestamp": 1748684825555,
-          "price": 0.0005919631576227935,
-          "source": "update",
-          "pnl": 0.0024402214202271337
-        },
-        {
-          "timestamp": 1748684855555,
-          "price": 0.0006075240642621947,
-          "source": "update",
-          "pnl": 0.0027672369136761115
-        },
-        {
-          "timestamp": 1748684885557,
-          "price": 0.0005860833111552394,
-          "source": "update",
-          "pnl": 0.0023166552978571946
-        },
-        {
-          "timestamp": 1748684915557,
-          "price": 0.0005782208640879654,
-          "source": "update",
-          "pnl": 0.002151424436506816
-        },
-        {
-          "timestamp": 1748684945557,
-          "price": 0.00060675205378911,
-          "source": "update",
-          "pnl": 0.0027510129627422806
-        },
-        {
-          "timestamp": 1748684975557,
-          "price": 0.0006040915598890924,
-          "source": "update",
-          "pnl": 0.00269510216360354
-        },
-        {
-          "timestamp": 1748685005557,
-          "price": 0.0006319361588059239,
-          "source": "update",
-          "pnl": 0.0032802618503547307
-        },
-        {
-          "timestamp": 1748685035559,
-          "price": 0.0006147134643912056,
-          "source": "update",
-          "pnl": 0.0029183235621132713
-        },
-        {
-          "timestamp": 1748685065559,
-          "price": 0.0006133343863937951,
-          "source": "update",
-          "pnl": 0.0028893419685417296
-        },
-        {
-          "timestamp": 1748685095560,
-          "price": 0.0006360527323932585,
-          "source": "update",
-          "pnl": 0.0033667724486236422
-        },
-        {
-          "timestamp": 1748685125560,
-          "price": 0.0006390556523558116,
-          "source": "update",
-          "pnl": 0.003429879398372677
-        },
-        {
-          "timestamp": 1748685155560,
-          "price": 0.0006424815050267534,
-          "source": "update",
-          "pnl": 0.0035018743616246784
-        },
-        {
-          "timestamp": 1748685185560,
-          "price": 0.0006488515674422181,
-          "source": "update",
-          "pnl": 0.003635742467922509
-        },
-        {
-          "timestamp": 1748685215560,
-          "price": 0.000646745008538264,
-          "source": "update",
-          "pnl": 0.003591472720958562
-        },
-        {
-          "timestamp": 1748685245560,
-          "price": 0.0006569295954710218,
-          "source": "update",
-          "pnl": 0.0038055038053014714
-        },
-        {
-          "timestamp": 1748685275562,
-          "price": 0.000683704925543721,
-          "source": "update",
-          "pnl": 0.004368192598370405
-        },
-        {
-          "timestamp": 1748685305562,
-          "price": 0.0006938102110479266,
-          "source": "update",
-          "pnl": 0.0045805571476977055
-        },
-        {
-          "timestamp": 1748685335562,
-          "price": 0.0007162029767683191,
-          "source": "update",
-          "pnl": 0.005051145494600305
-        },
-        {
-          "timestamp": 1748685365562,
-          "price": 0.0007047925712612567,
-          "source": "update",
-          "pnl": 0.004811353593407553
-        },
-        {
-          "timestamp": 1748685395562,
-          "price": 0.000674386301993349,
-          "source": "update",
-          "pnl": 0.004172359903707606
-        },
-        {
-          "timestamp": 1748685425563,
-          "price": 0.000689001930825676,
-          "source": "update",
-          "pnl": 0.004479510199344524
-        },
-        {
-          "timestamp": 1748685455563,
-          "price": 0.0006964697093038745,
-          "source": "update",
-          "pnl": 0.004636447023181783
-        },
-        {
-          "timestamp": 1748685485563,
-          "price": 0.0006921782547712325,
-          "source": "update",
-          "pnl": 0.004546261267677515
-        },
-        {
-          "timestamp": 1748685515563,
-          "price": 0.0006635823555719044,
-          "source": "update",
-          "pnl": 0.003945312858694233
-        },
-        {
-          "timestamp": 1748685545563,
-          "price": 0.0006779867270886667,
-          "source": "update",
-          "pnl": 0.0042480235405673115
-        },
-        {
-          "timestamp": 1748685575564,
-          "price": 0.0006669925604529054,
-          "source": "update",
-          "pnl": 0.00401697898058323
-        },
-        {
-          "timestamp": 1748685605565,
-          "price": 0.0007035106250336194,
-          "source": "update",
-          "pnl": 0.004784413242956224
-        },
-        {
-          "timestamp": 1748685635566,
-          "price": 0.0007340966953679573,
-          "source": "update",
-          "pnl": 0.0054271854871982585
-        },
-        {
-          "timestamp": 1748685665567,
-          "price": 0.0007173836032968474,
-          "source": "update",
-          "pnl": 0.0050759565917781555
-        },
-        {
-          "timestamp": 1748685695568,
-          "price": 0.0006968185552863294,
-          "source": "update",
-          "pnl": 0.004643778089663559
+          "timestamp": 1748687590717,
+          "price": 2.075e-8,
+          "source": "entry"
         }
       ]
     }
   },
   "closed": {},
-  "lastSaved": "2025-05-31T10:01:57.293Z",
+  "lastSaved": "2025-05-31T10:33:31.055Z",
   "priceUpdateStats": {
-    "successful": 35,
+    "successful": 0,
     "failed": 0,
-    "avgUpdateTime": 0.2548982614534907
+    "avgUpdateTime": 0
   }
 }
