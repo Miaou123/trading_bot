@@ -1,4 +1,4 @@
-// src/services/tradingWebSocket.js - Updated with creation/migration support
+// src/services/tradingWebSocket.js - Updated with IPFS metadata support
 const WebSocket = require('ws');
 const EventEmitter = require('events');
 const axios = require('axios');
@@ -12,9 +12,16 @@ class TradingWebSocket extends EventEmitter {
         this.minLikes = config.minLikes || parseInt(process.env.MIN_TWITTER_LIKES) || 100;
         
         this.httpClient = axios.create({
-            timeout: 5000,
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            timeout: 5000, // 5 second timeout for IPFS
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Connection': 'keep-alive'
+            },
+            keepAlive: true
         });
+
+        // IPFS metadata cache to avoid repeated fetches
+        this.metadataCache = new Map();
     }
 
     connect() {
@@ -72,8 +79,8 @@ class TradingWebSocket extends EventEmitter {
         try {
             const tokenSymbol = tokenData.symbol || tokenData.mint?.substring(0, 8) || 'UNKNOWN';
             
-            // Extract Twitter URL
-            const twitterUrl = this.extractTwitterUrl(tokenData);
+            // Extract Twitter URL with IPFS fallback
+            const twitterUrl = await this.extractTwitterUrlWithIPFS(tokenData);
             if (!twitterUrl) {
                 logger.info(`⏭️ SKIPPED: ${tokenSymbol} (${eventType}) - No Twitter URL found`);
                 return;
@@ -110,16 +117,154 @@ class TradingWebSocket extends EventEmitter {
         }
     }
 
-    extractTwitterUrl(tokenData) {
-        // Check direct fields
-        if (tokenData.twitter) {
-            const url = this.findTwitterStatusUrl(tokenData.twitter);
-            if (url) return url;
+    // 🔥 NEW: Extract Twitter URL with IPFS metadata fallback
+    async extractTwitterUrlWithIPFS(tokenData) {
+        const tokenAddress = tokenData.mint;
+        
+        // Step 1: Check direct fields in WebSocket message
+        const directUrl = this.extractDirectTwitterUrl(tokenData);
+        if (directUrl) {
+            logger.debug(`✅ Twitter URL found in WebSocket message`);
+            return directUrl;
         }
 
-        // For migrations, we might not have Twitter URL immediately
-        // This is where you'd add metadata fetching if needed
+        // Step 2: Fetch IPFS metadata if available
+        const ipfsUrl = await this.fetchIPFSMetadata(tokenAddress, tokenData.uri);
+        if (ipfsUrl) {
+            logger.debug(`✅ Twitter URL found in IPFS metadata`);
+            return ipfsUrl;
+        }
+
+        logger.debug(`❌ No Twitter URL found anywhere for ${tokenAddress}`);
         return null;
+    }
+
+    // Extract Twitter URL from direct WebSocket fields
+    extractDirectTwitterUrl(tokenData) {
+        const fieldsToCheck = ['twitter', 'description', 'website'];
+        
+        for (const field of fieldsToCheck) {
+            if (tokenData[field]) {
+                const url = this.findTwitterStatusUrl(tokenData[field]);
+                if (url) return url;
+            }
+        }
+        
+        return null;
+    }
+
+    // 🔥 NEW: Fetch IPFS metadata and extract Twitter URL
+    async fetchIPFSMetadata(tokenAddress, uriFromMessage = null) {
+        try {
+            // Check cache first
+            if (this.metadataCache.has(tokenAddress)) {
+                const cached = this.metadataCache.get(tokenAddress);
+                logger.debug(`📁 Using cached metadata for ${tokenAddress}`);
+                return cached.twitterUrl;
+            }
+
+            let metadataUri = uriFromMessage;
+            
+            // If no URI in message, get it from Helius
+            if (!metadataUri) {
+                metadataUri = await this.getMetadataURI(tokenAddress);
+            }
+            
+            if (!metadataUri) {
+                logger.debug(`❌ No metadata URI found for ${tokenAddress}`);
+                return null;
+            }
+
+            logger.debug(`📁 Fetching IPFS metadata: ${metadataUri}`);
+            
+            // Fetch metadata from IPFS
+            const response = await this.httpClient.get(metadataUri);
+            const metadata = response.data;
+            
+            // Extract Twitter URL from metadata
+            const twitterUrl = this.extractTwitterFromMetadata(metadata);
+            
+            // Cache result (even if null)
+            this.metadataCache.set(tokenAddress, {
+                metadata: metadata,
+                twitterUrl: twitterUrl,
+                timestamp: Date.now()
+            });
+            
+            return twitterUrl;
+            
+        } catch (error) {
+            logger.debug(`❌ IPFS metadata fetch failed for ${tokenAddress}: ${error.message}`);
+            return null;
+        }
+    }
+
+    // Get metadata URI from Helius API
+    async getMetadataURI(tokenAddress) {
+        try {
+            if (!process.env.HELIUS_RPC_URL) {
+                return null;
+            }
+            
+            const response = await this.httpClient.post(process.env.HELIUS_RPC_URL, {
+                jsonrpc: '2.0',
+                id: 'metadata-uri',
+                method: 'getAsset',
+                params: { id: tokenAddress }
+            });
+            
+            const uri = response.data?.result?.content?.json_uri;
+            logger.debug(`📁 Metadata URI from Helius: ${uri}`);
+            return uri;
+            
+        } catch (error) {
+            logger.debug(`❌ Helius metadata URI fetch failed: ${error.message}`);
+            return null;
+        }
+    }
+
+    // Extract Twitter URL from IPFS metadata
+    extractTwitterFromMetadata(metadata) {
+        if (!metadata || typeof metadata !== 'object') {
+            return null;
+        }
+        
+        // Check common fields where Twitter URL might be stored
+        const fieldsToCheck = [
+            'twitter',
+            'website', 
+            'external_url',
+            'description',
+            'socials.twitter',
+            'links.twitter'
+        ];
+        
+        for (const field of fieldsToCheck) {
+            const value = this.getNestedValue(metadata, field);
+            if (value) {
+                const url = this.findTwitterStatusUrl(value);
+                if (url) return url;
+            }
+        }
+        
+        // Check attributes array
+        if (metadata.attributes && Array.isArray(metadata.attributes)) {
+            for (const attr of metadata.attributes) {
+                if (attr.trait_type && attr.trait_type.toLowerCase().includes('twitter') && attr.value) {
+                    const url = this.findTwitterStatusUrl(attr.value);
+                    if (url) return url;
+                }
+            }
+        }
+        
+        return null;
+    }
+
+    // Helper: Get nested object value
+    getNestedValue(obj, path) {
+        return path.split('.').reduce((current, key) => {
+            return current && current[key] !== undefined ? current[key] : null;
+        }, obj);
     }
 
     findTwitterStatusUrl(text) {
@@ -156,11 +301,26 @@ class TradingWebSocket extends EventEmitter {
         return match ? match[1] : null;
     }
 
+    // Clean up cache periodically
+    cleanupCache() {
+        const now = Date.now();
+        const maxAge = 300000; // 5 minutes
+        
+        for (const [key, value] of this.metadataCache.entries()) {
+            if (now - value.timestamp > maxAge) {
+                this.metadataCache.delete(key);
+            }
+        }
+    }
+
     disconnect() {
         if (this.ws) {
             this.ws.close();
             this.isConnected = false;
         }
+        
+        // Clean up cache
+        this.metadataCache.clear();
     }
 }
 
