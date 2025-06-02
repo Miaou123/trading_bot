@@ -1,100 +1,386 @@
 {
   "active": {
-    "pos_1748863234442_fqdor6bi6": {
-      "id": "pos_1748863234442_fqdor6bi6",
-      "tokenAddress": "HQC1xWpfKArsr6g8vBPn6MrgiePPPMPZ7uaHaAxYpump",
-      "symbol": "LIVE",
+    "pos_1748867163115_tp0rv1zli": {
+      "id": "pos_1748867163115_tp0rv1zli",
+      "tokenAddress": "6hnqWpThdZPRS3XvSQDQg7WjxGhgsVSg6AVp6bgYpump",
+      "symbol": "UNKNOWN",
       "side": "LONG",
-      "entryPrice": 6.616761613855464e-7,
-      "quantity": "15113.133257",
+      "entryPrice": 4.2205105981481046e-7,
+      "quantity": "23693.815635453793",
       "investedAmount": 0.01,
-      "entryTime": 1748863234442,
-      "txHash": "aQrm6x6n7bjJctg4WTPg/RB6FunBOcyW4P7hj61PeZ8B3GnG6l2UKix8M2ecs0LBuMjULBX2VuDr63p1y3hsCQ==",
-      "stopLossPrice": 3.308380806927732e-7,
+      "entryTime": 1748867163115,
+      "txHash": "PAPER_TRADE_1748867163115",
+      "stopLossPrice": 2.1102552990740523e-7,
       "takeProfitLevels": [
         {
-          "targetPrice": 0.0000013233523227710928,
+          "targetPrice": 8.441021196296209e-7,
           "sellPercentage": 50,
           "percentage": 100,
           "triggered": false,
           "level": 1
         },
         {
-          "targetPrice": 0.0000026467046455421856,
+          "targetPrice": 0.0000016882042392592419,
           "sellPercentage": 25,
           "percentage": 300,
           "triggered": false,
           "level": 2
         },
         {
-          "targetPrice": 0.000006616761613855464,
+          "targetPrice": 0.000004220510598148105,
           "sellPercentage": 100,
           "percentage": 900,
           "triggered": false,
           "level": 3
         }
       ],
-      "remainingQuantity": "15113.133257",
+      "remainingQuantity": "23693.815635453793",
       "alert": {
         "token": {
-          "address": "HQC1xWpfKArsr6g8vBPn6MrgiePPPMPZ7uaHaAxYpump",
-          "symbol": "LIVE",
-          "name": "Live Test Token"
+          "address": "6hnqWpThdZPRS3XvSQDQg7WjxGhgsVSg6AVp6bgYpump",
+          "symbol": "UNKNOWN",
+          "name": "Unknown Token"
         },
         "twitter": {
-          "likes": 1000,
-          "views": 100000,
-          "url": "https://twitter.com/live/test"
+          "likes": 1102,
+          "url": "https://x.com/JamesWynnReal/status/1929471331529277587"
         },
-        "confidence": "HIGH",
-        "eventType": "creation"
+        "confidence": "MEDIUM"
+      },
+      "paperTrade": true,
+      "priceSource": "derived_pool",
+      "migrationPool": null,
+      "poolAddress": "3pyDkw1a8LRQWRPxiacueX987KccJ4Q1jXuERMkrP8g4",
+      "eventType": "creation",
+      "isMigration": false,
+      "createdAt": 1748867163115,
+      "status": "ACTIVE",
+      "totalPnL": 0,
+      "currentPrice": 4.2205105981481046e-7,
+      "currentValue": 0.01,
+      "unrealizedPnL": 0,
+      "priceChange": 0,
+      "lastPriceUpdate": 1748867163115,
+      "lastPriceSource": "derived_pool",
+      "priceHistory": [
+        {
+          "timestamp": 1748867163115,
+          "price": 4.2205105981481046e-7,
+          "source": "entry"
+        }
+      ]
+    },
+    "pos_1748869001062_3z34vm45n": {
+      "id": "pos_1748869001062_3z34vm45n",
+      "tokenAddress": "AVieAb1uCga7aYC4Z4gfd3WsxfYEm7LxbtQKkN68pump",
+      "symbol": "UNKNOWN",
+      "side": "LONG",
+      "entryPrice": 4.2428009127093466e-7,
+      "quantity": "23569.335931",
+      "investedAmount": 0.01,
+      "entryTime": 1748869001062,
+      "txHash": "K8bP/xduIcHApHCwhUevuKtdxYWy/RnjBGuT0PzBdWrj6UroXeHDp+ueD5FiNl2kpcpPitYFksRuNoBfJmphAQ==",
+      "stopLossPrice": 2.1214004563546733e-7,
+      "takeProfitLevels": [
+        {
+          "targetPrice": 8.485601825418693e-7,
+          "sellPercentage": 50,
+          "percentage": 100,
+          "triggered": false,
+          "level": 1
+        },
+        {
+          "targetPrice": 0.0000016971203650837386,
+          "sellPercentage": 25,
+          "percentage": 300,
+          "triggered": false,
+          "level": 2
+        },
+        {
+          "targetPrice": 0.000004242800912709346,
+          "sellPercentage": 100,
+          "percentage": 900,
+          "triggered": false,
+          "level": 3
+        }
+      ],
+      "remainingQuantity": "23569.335931",
+      "alert": {
+        "token": {
+          "address": "AVieAb1uCga7aYC4Z4gfd3WsxfYEm7LxbtQKkN68pump",
+          "symbol": "UNKNOWN",
+          "name": "Unknown Token"
+        },
+        "twitter": {
+          "likes": 11,
+          "url": "https://x.com/Mostaccho/status/1929504561653293537"
+        },
+        "confidence": "MEDIUM"
       },
       "paperTrade": false,
       "priceSource": "derived_pool",
       "migrationPool": null,
-      "poolAddress": "A4Aj31bhHzLoTh2WVprPMWmgcwgPMjgqsSARsPvyFp28",
+      "poolAddress": "ASa1BeeBwDzHPZUQTtkenxjUfDNMTfkR5R5sACECvz5U",
       "eventType": "creation",
       "isMigration": false,
       "tradingMethod": "pumpswap",
-      "createdAt": 1748863234442,
+      "createdAt": 1748869001062,
       "status": "ACTIVE",
       "totalPnL": 0,
-      "currentPrice": 6.616761613855464e-7,
+      "currentPrice": 4.2428009127093466e-7,
       "currentValue": 0.01,
       "unrealizedPnL": 0,
       "priceChange": 0,
-      "lastPriceUpdate": 1748863234442,
+      "lastPriceUpdate": 1748869001062,
       "lastPriceSource": "derived_pool",
       "priceHistory": [
         {
-          "timestamp": 1748863234442,
-          "price": 6.616761613855464e-7,
+          "timestamp": 1748869001062,
+          "price": 4.2428009127093466e-7,
+          "source": "entry"
+        }
+      ]
+    },
+    "pos_1748869890259_wwtk7q3hm": {
+      "id": "pos_1748869890259_wwtk7q3hm",
+      "tokenAddress": "5D1m1c3uEHk6YqLU8rD4ZZQAeq8yPiC2ogp3XhNMpump",
+      "symbol": "UNKNOWN",
+      "side": "LONG",
+      "entryPrice": 5.535170070629717e-7,
+      "quantity": "18066.292223",
+      "investedAmount": 0.01,
+      "entryTime": 1748869890259,
+      "txHash": "U3tN89g0kyZnU4bvL9fzQEgWbvTrrDeJj8IuSsojFETiA7Yi4nghm9x7M8R6+IH9uN5qQ3EyMZiMXBmPrXLEDw==",
+      "stopLossPrice": 2.767585035314858e-7,
+      "takeProfitLevels": [
+        {
+          "targetPrice": 0.0000011070340141259433,
+          "sellPercentage": 50,
+          "percentage": 100,
+          "triggered": false,
+          "level": 1
+        },
+        {
+          "targetPrice": 0.0000022140680282518866,
+          "sellPercentage": 25,
+          "percentage": 300,
+          "triggered": false,
+          "level": 2
+        },
+        {
+          "targetPrice": 0.0000055351700706297165,
+          "sellPercentage": 100,
+          "percentage": 900,
+          "triggered": false,
+          "level": 3
+        }
+      ],
+      "remainingQuantity": "18066.292223",
+      "alert": {
+        "token": {
+          "address": "5D1m1c3uEHk6YqLU8rD4ZZQAeq8yPiC2ogp3XhNMpump",
+          "symbol": "UNKNOWN",
+          "name": "Unknown Token"
+        },
+        "twitter": {
+          "likes": 13334,
+          "url": "https://x.com/doodlenoodleh/status/1928907461227942353"
+        },
+        "confidence": "MEDIUM"
+      },
+      "paperTrade": false,
+      "priceSource": "derived_pool",
+      "migrationPool": null,
+      "poolAddress": "6DrXCVXb3tAidzCvPAESNdCHBuUNR53UZbYnV1K897w3",
+      "eventType": "creation",
+      "isMigration": false,
+      "tradingMethod": "pumpswap",
+      "createdAt": 1748869890259,
+      "status": "ACTIVE",
+      "totalPnL": 0,
+      "currentPrice": 5.535170070629717e-7,
+      "currentValue": 0.01,
+      "unrealizedPnL": 0,
+      "priceChange": 0,
+      "lastPriceUpdate": 1748869890259,
+      "lastPriceSource": "derived_pool",
+      "priceHistory": [
+        {
+          "timestamp": 1748869890259,
+          "price": 5.535170070629717e-7,
+          "source": "entry"
+        }
+      ]
+    },
+    "pos_1748870997003_ptqhdz23u": {
+      "id": "pos_1748870997003_ptqhdz23u",
+      "tokenAddress": "3QLoDVB9UDpdpHEZySL1zmdKsxjR3KmjFkLiqtDcpump",
+      "symbol": "UNKNOWN",
+      "side": "LONG",
+      "entryPrice": 4.2890744863681896e-7,
+      "quantity": "23315.05324",
+      "investedAmount": 0.01,
+      "entryTime": 1748870997003,
+      "txHash": "tmVUnHlYYMXkyffBYivUqzdMv4Pu3dY71tEjSnSxCecuSA5i/iBQvoIVIElMlMDuZV+FfxovBS2BCYWISwcnAA==",
+      "stopLossPrice": 2.1445372431840948e-7,
+      "takeProfitLevels": [
+        {
+          "targetPrice": 8.578148972736379e-7,
+          "sellPercentage": 50,
+          "percentage": 100,
+          "triggered": false,
+          "level": 1
+        },
+        {
+          "targetPrice": 0.0000017156297945472758,
+          "sellPercentage": 25,
+          "percentage": 300,
+          "triggered": false,
+          "level": 2
+        },
+        {
+          "targetPrice": 0.000004289074486368189,
+          "sellPercentage": 100,
+          "percentage": 900,
+          "triggered": false,
+          "level": 3
+        }
+      ],
+      "remainingQuantity": "23315.05324",
+      "alert": {
+        "token": {
+          "address": "3QLoDVB9UDpdpHEZySL1zmdKsxjR3KmjFkLiqtDcpump",
+          "symbol": "UNKNOWN",
+          "name": "Unknown Token"
+        },
+        "twitter": {
+          "likes": 71,
+          "url": "https://x.com/aeyakovenko/status/1929525676547445244"
+        },
+        "confidence": "MEDIUM"
+      },
+      "paperTrade": false,
+      "priceSource": "derived_pool",
+      "migrationPool": null,
+      "poolAddress": "32BcCtHvYZoc6kM5yQEw3r5Yt7eUxuHWL7diKCasTi3Z",
+      "eventType": "creation",
+      "isMigration": false,
+      "tradingMethod": "pumpswap",
+      "createdAt": 1748870997003,
+      "status": "ACTIVE",
+      "totalPnL": 0,
+      "currentPrice": 4.2890744863681896e-7,
+      "currentValue": 0.01,
+      "unrealizedPnL": 0,
+      "priceChange": 0,
+      "lastPriceUpdate": 1748870997003,
+      "lastPriceSource": "derived_pool",
+      "priceHistory": [
+        {
+          "timestamp": 1748870997003,
+          "price": 4.2890744863681896e-7,
+          "source": "entry"
+        }
+      ]
+    },
+    "pos_1748873207320_j8kjnzs6w": {
+      "id": "pos_1748873207320_j8kjnzs6w",
+      "tokenAddress": "AMCaXCFYXYNNj5CK8ULi8oioh7DsZ9h1fmtF4xCXpump",
+      "symbol": "UNKNOWN",
+      "side": "LONG",
+      "entryPrice": 4.2459997915404327e-7,
+      "quantity": "23551.579112",
+      "investedAmount": 0.01,
+      "entryTime": 1748873207320,
+      "txHash": "aUhVEpz+pF8a4Va+WFq0rwIG7EAlqeCqW/eDQ0h2Wgzea6RTP3G65hWsPPQU2WvF1j9SXGtpZVZjuMQcsHGfCQ==",
+      "stopLossPrice": 2.1229998957702164e-7,
+      "takeProfitLevels": [
+        {
+          "targetPrice": 8.491999583080865e-7,
+          "sellPercentage": 50,
+          "percentage": 100,
+          "triggered": false,
+          "level": 1
+        },
+        {
+          "targetPrice": 0.000001698399916616173,
+          "sellPercentage": 25,
+          "percentage": 300,
+          "triggered": false,
+          "level": 2
+        },
+        {
+          "targetPrice": 0.000004245999791540433,
+          "sellPercentage": 100,
+          "percentage": 900,
+          "triggered": false,
+          "level": 3
+        }
+      ],
+      "remainingQuantity": "23551.579112",
+      "alert": {
+        "token": {
+          "address": "AMCaXCFYXYNNj5CK8ULi8oioh7DsZ9h1fmtF4xCXpump",
+          "symbol": "UNKNOWN",
+          "name": "Unknown Token"
+        },
+        "twitter": {
+          "likes": 1366,
+          "url": "https://x.com/JamesWynnReal/status/1929536882125447536"
+        },
+        "confidence": "MEDIUM"
+      },
+      "paperTrade": false,
+      "priceSource": "derived_pool",
+      "migrationPool": null,
+      "poolAddress": "B8Cvn4tqpV2wKyuBz9EC1m8vuYyChAXWXQG6ZTkMiZtT",
+      "eventType": "creation",
+      "isMigration": false,
+      "tradingMethod": "pumpswap",
+      "createdAt": 1748873207320,
+      "status": "ACTIVE",
+      "totalPnL": 0,
+      "currentPrice": 4.2459997915404327e-7,
+      "currentValue": 0.01,
+      "unrealizedPnL": 0,
+      "priceChange": 0,
+      "lastPriceUpdate": 1748873207320,
+      "lastPriceSource": "derived_pool",
+      "priceHistory": [
+        {
+          "timestamp": 1748873207320,
+          "price": 4.2459997915404327e-7,
           "source": "entry"
         }
       ]
     }
   },
   "closed": {},
-  "lastSaved": "2025-06-02T11:24:36.945Z",
+  "lastSaved": "2025-06-02T15:52:20.944Z",
   "stats": {
     "stopLossTriggered": 0,
     "takeProfitTriggered": 0,
     "priceUpdates": 0,
-    "manualPriceUpdates": 0,
-    "jupiterPriceUpdates": 0,
-    "priceUpdateFailures": 0
+    "poolBasedPriceUpdates": 0,
+    "fallbackPriceUpdates": 0,
+    "priceUpdateFailures": 0,
+    "liveSellsExecuted": 0,
+    "paperSellsExecuted": 0,
+    "stopLossExecutions": 0,
+    "takeProfitExecutions": 0,
+    "totalLivePnL": 0
   },
   "priceUpdateStats": {
-    "manual": {
-      "attempts": 6,
+    "poolBased": {
+      "attempts": 0,
       "successes": 0,
       "totalTime": 0
     },
-    "jupiter": {
-      "attempts": 1,
+    "fallback": {
+      "attempts": 0,
       "successes": 0,
       "totalTime": 0
     },
-    "lastUpdate": 1748863231742
+    "lastUpdate": 1748878796441
   }
 }

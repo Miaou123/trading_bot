@@ -27,8 +27,10 @@ class TradingApp {
             initialInvestment: this.config.initialInvestment
         });
 
+        // 🔥 PASS BOT MODE TO WEBSOCKET
         this.webSocket = new TradingWebSocket({
-            minLikes: this.config.minTwitterLikes
+            minLikes: this.config.minTwitterLikes,
+            botMode: this.botMode // Pass the bot mode
         });
 
         this.isRunning = false;
@@ -41,7 +43,8 @@ class TradingApp {
         this.webSocket.on('qualifiedToken', async (tokenData) => {
             const eventType = tokenData.eventType || 'creation';
             
-            // 🔥 MODE FILTERING
+            // This check is now redundant since WebSocket filters at subscription level
+            // But keeping it as a safety net
             if (!this.shouldProcessEvent(eventType)) {
                 logger.info(`⏭️ SKIPPED: ${tokenData.token.symbol} (${eventType}) - Bot mode: ${this.botMode}`);
                 return;

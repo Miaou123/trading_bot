@@ -1,4 +1,4 @@
-// src/bot/tradingBot.js - ULTIMATE: Pool derivation + PumpSwap direct trading
+// src/bot/tradingBot.js - ENHANCED: Added live PumpSwap sell execution
 const { Connection, PublicKey, Keypair, VersionedTransaction } = require('@solana/web3.js');
 const { AccountLayout } = require('@solana/spl-token');
 const { NATIVE_MINT } = require('@solana/spl-token');
@@ -65,11 +65,15 @@ class TradingBot extends EventEmitter {
             priceFailures: 0,
             // Trading method stats
             pumpSwapTrades: 0,
+            pumpSwapSells: 0,
             paperTrades: 0,
             liveTrades: 0,
             // Migration specific
             migrationTrades: 0,
             instantPoolTrades: 0,
+            // Stop loss & take profit
+            stopLossExecutions: 0,
+            takeProfitExecutions: 0,
             errors: 0
         };
 
@@ -359,6 +363,146 @@ class TradingBot extends EventEmitter {
         }
     }
 
+    // 🚀 NEW: Execute REAL PumpSwap sell
+    async executePumpSwapSell(position, sellPercentage, reason = 'Manual Sell') {
+        try {
+            if (!this.pumpInternalSdk || !this.wallet) {
+                throw new Error('PumpSwap SDK or wallet not available for live trading');
+            }
+
+            const tokenAmount = parseFloat(position.remainingQuantity) * (sellPercentage / 100);
+            const poolAddress = position.poolAddress;
+
+            if (!poolAddress) {
+                throw new Error('Pool address not found in position data');
+            }
+
+            logger.info(`🚀 Executing REAL PumpSwap sell: ${tokenAmount.toFixed(6)} ${position.symbol} (${sellPercentage}%)`);
+            logger.info(`📍 Reason: ${reason}`);
+
+            const pool = new PublicKey(poolAddress);
+            const baseAmount = new BN(tokenAmount * Math.pow(10, 6)); // Convert to base units (6 decimals)
+            const slippage = this.config.slippageTolerance;
+
+            // Get expected SOL for these tokens
+            const sellResult = await this.pumpInternalSdk.sellBaseInputInternal(pool, baseAmount, slippage);
+            const expectedSol = parseFloat(sellResult.uiQuote.toString()) / 1e9;
+            const minSolReceived = parseFloat(sellResult.minQuote.toString()) / 1e9;
+
+            logger.info(`💰 Expected: ${expectedSol.toFixed(6)} SOL for ${tokenAmount.toFixed(6)} ${position.symbol}`);
+            logger.info(`🛡️ Min SOL (with ${slippage}% slippage): ${minSolReceived.toFixed(6)} SOL`);
+
+            // Get transaction instructions
+            const instructions = await this.pumpInternalSdk.sellBaseInput(
+                pool,
+                baseAmount,
+                slippage,
+                this.wallet.publicKey
+            );
+
+            // Execute transaction
+            const { sendAndConfirmTransaction } = require('@pump-fun/pump-swap-sdk');
+            const [transaction, error] = await sendAndConfirmTransaction(
+                this.connection,
+                this.wallet.publicKey,
+                instructions,
+                [this.wallet]
+            );
+
+            if (error) {
+                throw new Error(`PumpSwap sell transaction failed: ${JSON.stringify(error)}`);
+            }
+
+            const signature = Buffer.from(transaction.signatures[0]).toString('base64');
+            this.stats.pumpSwapSells++;
+            this.stats.sellOrders++;
+
+            // Calculate PnL
+            const originalInvestment = (tokenAmount / parseFloat(position.quantity)) * position.investedAmount;
+            const pnl = expectedSol - originalInvestment;
+            const pnlPercentage = (pnl / originalInvestment) * 100;
+
+            logger.info(`✅ PumpSwap SELL SUCCESS!`);
+            logger.info(`   📝 Signature: ${signature}`);
+            logger.info(`   💰 Received: ${expectedSol.toFixed(6)} SOL`);
+            logger.info(`   📊 PnL: ${pnl > 0 ? '+' : ''}${pnl.toFixed(6)} SOL (${pnlPercentage > 0 ? '+' : ''}${pnlPercentage.toFixed(2)}%)`);
+
+            // Update stats
+            this.stats.totalPnL += pnl;
+            if (reason.includes('Stop Loss')) {
+                this.stats.stopLossExecutions++;
+            } else if (reason.includes('Take Profit')) {
+                this.stats.takeProfitExecutions++;
+            }
+
+            // Update position in position manager
+            if (this.positionManager) {
+                await this.positionManager.updatePositionAfterSell(
+                    position.id,
+                    tokenAmount,
+                    expectedSol,
+                    pnl,
+                    signature,
+                    reason
+                );
+            }
+
+            this.emit('tradeExecuted', {
+                type: 'LIVE_SELL',
+                symbol: position.symbol,
+                amount: tokenAmount.toString(),
+                price: expectedSol / tokenAmount,
+                signature: signature,
+                pnl: pnl,
+                pnlPercentage: pnlPercentage,
+                reason: reason,
+                method: 'pumpswap'
+            });
+
+            return {
+                success: true,
+                signature: signature,
+                tokensSold: tokenAmount,
+                solReceived: expectedSol,
+                pnl: pnl,
+                pnlPercentage: pnlPercentage,
+                method: 'pumpswap'
+            };
+
+        } catch (error) {
+            logger.error(`❌ PumpSwap sell failed: ${error.message}`);
+            throw error;
+        }
+    }
+
+    // 🚀 NEW: Sell position by ID (for position manager integration)
+    async sellPosition(positionId, sellPercentage, reason = 'Manual Sell') {
+        try {
+            if (!this.positionManager) {
+                throw new Error('Position manager not connected');
+            }
+
+            const position = this.positionManager.positions.get(positionId);
+            if (!position) {
+                throw new Error(`Position ${positionId} not found`);
+            }
+
+            logger.info(`🔄 Selling position: ${position.symbol} (${sellPercentage}%) - ${reason}`);
+
+            if (this.config.tradingMode === 'live') {
+                // Execute real PumpSwap sell
+                return await this.executePumpSwapSell(position, sellPercentage, reason);
+            } else {
+                // Execute paper sell (handled by position manager)
+                return await this.positionManager.simulatePartialSell(position, sellPercentage, reason);
+            }
+
+        } catch (error) {
+            logger.error(`❌ Sell position failed: ${error.message}`);
+            throw error;
+        }
+    }
+
     // 📝 Execute paper buy (for paper trading mode)
     async executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens, metadata = {}) {
         const stopLossPrice = this.calculateStopLossPrice(currentPrice);
@@ -621,7 +765,13 @@ class TradingBot extends EventEmitter {
                 paperTrades: this.stats.paperTrades,
                 liveTrades: this.stats.liveTrades,
                 pumpSwapTrades: this.stats.pumpSwapTrades,
+                pumpSwapSells: this.stats.pumpSwapSells,
                 manualPrices: this.stats.manualPrices
+            },
+            riskManagement: {
+                stopLossExecutions: this.stats.stopLossExecutions,
+                takeProfitExecutions: this.stats.takeProfitExecutions,
+                totalPnL: this.stats.totalPnL.toFixed(6) + ' SOL'
             },
             migration: {
                 totalMigrations: this.stats.migrationTrades,

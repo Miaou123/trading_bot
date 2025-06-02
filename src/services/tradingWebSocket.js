@@ -1,4 +1,4 @@
-// src/services/tradingWebSocket.js - FIXED migration detection + enhanced logging
+// src/services/tradingWebSocket.js - FIXED: Subscribe only to desired events based on bot mode
 const WebSocket = require('ws');
 const EventEmitter = require('events');
 const axios = require('axios');
@@ -11,6 +11,9 @@ class TradingWebSocket extends EventEmitter {
         this.isConnected = false;
         this.minLikes = config.minLikes || parseInt(process.env.MIN_TWITTER_LIKES) || 100;
         this.connectionId = Math.random().toString(36).substring(7);
+        
+        // 🔥 NEW: Bot mode to control which events to subscribe to
+        this.botMode = config.botMode || process.env.BOT_MODE || 'both'; // 'creation', 'migration', 'both'
         
         this.httpClient = axios.create({
             timeout: 5000, // 5 second timeout for IPFS
@@ -41,17 +44,17 @@ class TradingWebSocket extends EventEmitter {
 
     connect() {
         logger.info(`[${this.connectionId}] Connecting to PumpPortal for trading signals...`);
+        logger.info(`[${this.connectionId}] 🎯 Bot Mode: ${this.botMode.toUpperCase()}`);
+        
         this.ws = new WebSocket('wss://pumpportal.fun/api/data');
         
         this.ws.on('open', () => {
             logger.info(`[${this.connectionId}] 🔗 Connected to PumpPortal`);
             this.isConnected = true;
             
-            // Subscribe to both creation and migration events
-            this.ws.send(JSON.stringify({ method: 'subscribeNewToken' }));
-            this.ws.send(JSON.stringify({ method: 'subscribeMigration' }));
+            // 🔥 CONDITIONAL SUBSCRIPTION based on bot mode
+            this.subscribeBasedOnMode();
             
-            logger.info(`[${this.connectionId}] ✅ Subscribed to creation and migration events`);
             logger.info(`[${this.connectionId}] 📊 Minimum likes threshold: ${this.minLikes}`);
         });
 
@@ -67,25 +70,38 @@ class TradingWebSocket extends EventEmitter {
                     return;
                 }
                 
-                // 🚀 FIXED: Handle creation events
+                // 🔥 PROCESS ONLY RELEVANT EVENTS based on bot mode
                 if (message.txType === 'create' && message.mint) {
-                    this.messageStats.creations++;
-                    logger.info(`[${this.connectionId}] 🪙 New token: ${message.symbol} - ${message.mint}`);
-                    await this.processToken(message, 'creation');
+                    // Only process if bot mode allows creations
+                    if (this.shouldProcessEventType('creation')) {
+                        this.messageStats.creations++;
+                        logger.info(`[${this.connectionId}] 🪙 New token: ${message.symbol} - ${message.mint}`);
+                        await this.processToken(message, 'creation');
+                    } else {
+                        logger.debug(`[${this.connectionId}] ⏭️ Ignoring creation (mode: ${this.botMode}): ${message.symbol}`);
+                    }
                 }
-                // 🚀 FIXED: Handle migration events (correct txType)
                 else if (message.txType === 'migrate' && message.mint) {
-                    this.messageStats.migrations++;
-                    logger.info(`[${this.connectionId}] 🔄 Migration: ${message.mint} (pool: ${message.pool || 'unknown'})`);
-                    await this.processToken(message, 'migration');
+                    // Only process if bot mode allows migrations
+                    if (this.shouldProcessEventType('migration')) {
+                        this.messageStats.migrations++;
+                        logger.info(`[${this.connectionId}] 🔄 Migration: ${message.mint} (pool: ${message.pool || 'unknown'})`);
+                        await this.processToken(message, 'migration');
+                    } else {
+                        logger.debug(`[${this.connectionId}] ⏭️ Ignoring migration (mode: ${this.botMode}): ${message.mint}`);
+                    }
                 }
-                // 🚀 ADDED: Handle legacy migration format (just in case)
+                // Handle legacy migration format (just in case)
                 else if (message.txType === 'migration' && message.mint) {
-                    this.messageStats.migrations++;
-                    logger.info(`[${this.connectionId}] 🔄 Migration (legacy): ${message.mint}`);
-                    await this.processToken(message, 'migration');
+                    if (this.shouldProcessEventType('migration')) {
+                        this.messageStats.migrations++;
+                        logger.info(`[${this.connectionId}] 🔄 Migration (legacy): ${message.mint}`);
+                        await this.processToken(message, 'migration');
+                    } else {
+                        logger.debug(`[${this.connectionId}] ⏭️ Ignoring legacy migration (mode: ${this.botMode}): ${message.mint}`);
+                    }
                 }
-                // Log unknown events for debugging
+                // Log unknown events for debugging (only if we care about them)
                 else if (message.mint) {
                     logger.debug(`[${this.connectionId}] ❓ Unknown event: ${message.txType || 'NO_TYPE'} for ${message.mint}`);
                 }
@@ -105,6 +121,43 @@ class TradingWebSocket extends EventEmitter {
             this.isConnected = false;
             setTimeout(() => this.connect(), 5000);
         });
+    }
+
+    // 🔥 NEW: Subscribe only to relevant events based on bot mode
+    subscribeBasedOnMode() {
+        switch (this.botMode) {
+            case 'creation':
+                this.ws.send(JSON.stringify({ method: 'subscribeNewToken' }));
+                logger.info(`[${this.connectionId}] ✅ Subscribed to CREATION events only`);
+                break;
+            
+            case 'migration':
+                this.ws.send(JSON.stringify({ method: 'subscribeMigration' }));
+                logger.info(`[${this.connectionId}] ✅ Subscribed to MIGRATION events only`);
+                break;
+            
+            case 'both':
+            default:
+                this.ws.send(JSON.stringify({ method: 'subscribeNewToken' }));
+                this.ws.send(JSON.stringify({ method: 'subscribeMigration' }));
+                logger.info(`[${this.connectionId}] ✅ Subscribed to BOTH creation and migration events`);
+                break;
+        }
+    }
+
+    // 🔥 NEW: Check if we should process this event type based on bot mode
+    shouldProcessEventType(eventType) {
+        switch (this.botMode) {
+            case 'creation':
+                return eventType === 'creation';
+            case 'migration':
+                return eventType === 'migration';
+            case 'both':
+                return true;
+            default:
+                logger.warn(`[${this.connectionId}] Unknown bot mode: ${this.botMode}, defaulting to 'both'`);
+                return true;
+        }
     }
 
     async processToken(tokenData, eventType = 'creation') {
@@ -154,12 +207,12 @@ class TradingWebSocket extends EventEmitter {
                     likes: likes,
                     url: twitterUrl
                 },
-                // 🚀 ADDED: Include migration-specific data
+                // Include migration-specific data
                 migration: eventType === 'migration' ? {
                     pool: tokenData.pool || 'unknown',
                     signature: tokenData.signature
                 } : undefined,
-                // 🚀 ADDED: Performance metrics
+                // Performance metrics
                 performance: {
                     processingTime: totalTime,
                     likesCheckTime: likesTime
@@ -174,7 +227,7 @@ class TradingWebSocket extends EventEmitter {
         }
     }
 
-    // 🔥 Enhanced: Extract Twitter URL with IPFS metadata fallback + better logging
+    // Extract Twitter URL with IPFS metadata fallback + better logging
     async extractTwitterUrlWithIPFS(tokenData) {
         const tokenAddress = tokenData.mint;
         
@@ -213,7 +266,7 @@ class TradingWebSocket extends EventEmitter {
         return null;
     }
 
-    // 🔥 Enhanced: Fetch IPFS metadata and extract Twitter URL with better error handling
+    // Fetch IPFS metadata and extract Twitter URL with better error handling
     async fetchIPFSMetadata(tokenAddress, uriFromMessage = null) {
         try {
             // Check cache first
@@ -382,7 +435,7 @@ class TradingWebSocket extends EventEmitter {
         return match ? match[1] : null;
     }
 
-    // 🚀 Enhanced: Clean up cache periodically with better logging
+    // Clean up cache periodically with better logging
     cleanupCache() {
         const now = Date.now();
         const maxAge = 300000; // 5 minutes
@@ -400,11 +453,12 @@ class TradingWebSocket extends EventEmitter {
         }
     }
 
-    // 🚀 NEW: Get comprehensive stats
+    // Get comprehensive stats including bot mode
     getStats() {
         return {
             connectionId: this.connectionId,
             isConnected: this.isConnected,
+            botMode: this.botMode,
             messageStats: this.messageStats,
             cacheSize: this.metadataCache.size,
             minLikes: this.minLikes,
@@ -413,10 +467,10 @@ class TradingWebSocket extends EventEmitter {
         };
     }
 
-    // 🚀 NEW: Get stats string for logging
+    // Get stats string for logging
     getStatsString() {
         const stats = this.getStats();
-        return `📊 Trading Bot Stats: ${stats.messageStats.received} received | ${stats.messageStats.processed} processed | ${stats.messageStats.creations} creations | ${stats.messageStats.migrations} migrations | ${stats.messageStats.qualified} qualified | ${stats.messageStats.skipped} skipped | ${stats.messageStats.errors} errors | Qualification rate: ${stats.qualificationRate}`;
+        return `📊 Trading Bot Stats (${stats.botMode.toUpperCase()} mode): ${stats.messageStats.received} received | ${stats.messageStats.processed} processed | ${stats.messageStats.creations} creations | ${stats.messageStats.migrations} migrations | ${stats.messageStats.qualified} qualified | ${stats.messageStats.skipped} skipped | ${stats.messageStats.errors} errors | Qualification rate: ${stats.qualificationRate}`;
     }
 
     disconnect() {
