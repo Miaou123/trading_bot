@@ -1,4 +1,4 @@
-// src/bot/positionManager.js - Clean version with essential features only
+// src/bot/positionManager.js - ENHANCED: Fast manual price updates with Jupiter fallback
 const EventEmitter = require('events');
 const fs = require('fs').promises;
 const path = require('path');
@@ -12,7 +12,9 @@ class PositionManager extends EventEmitter {
             tradingMode: config.tradingMode || 'paper',
             positionsFile: config.positionsFile || './positions.json',
             maxPositions: config.maxPositions || 20,
-            fastUpdateInterval: config.fastUpdateInterval || 5000,  // 1s updates
+            // 🚀 ENHANCED: Different update intervals for different price sources
+            fastUpdateInterval: config.fastUpdateInterval || 1000,  // 1s for manual RPC
+            slowUpdateInterval: config.slowUpdateInterval || 60000, // 1min for Jupiter fallback
             ...config
         };
 
@@ -20,72 +22,227 @@ class PositionManager extends EventEmitter {
         this.closedPositions = new Map();
         this.tradingBot = null;
         
+        // 🚀 ENHANCED: Track price source performance
+        this.priceUpdateStats = {
+            manual: { attempts: 0, successes: 0, totalTime: 0 },
+            jupiter: { attempts: 0, successes: 0, totalTime: 0 },
+            lastUpdate: Date.now()
+        };
+        
         this.stats = {
             stopLossTriggered: 0,
             takeProfitTriggered: 0,
-            priceUpdates: 0
+            priceUpdates: 0,
+            manualPriceUpdates: 0,
+            jupiterPriceUpdates: 0,
+            priceUpdateFailures: 0
         };
         
         this.loadPositions();
-        this.startPriceUpdates();
+        this.startEnhancedPriceUpdates();
+        this.startPriceStatsLogging();
     }
 
     setTradingBot(tradingBot) {
         this.tradingBot = tradingBot;
-        logger.info('📊 TradingBot connected for price updates');
+        logger.info('📊 Enhanced TradingBot connected for dual-speed price updates');
     }
 
-    // Monitor all positions for price changes and triggers
-    startPriceUpdates() {
+    // 🚀 ENHANCED: Fast updates for manual RPC, slower for Jupiter fallback
+    startEnhancedPriceUpdates() {
+        // Fast updates using manual RPC (1 second)
         setInterval(async () => {
             if (this.positions.size > 0 && this.tradingBot) {
-                await this.updateAllPositions();
+                await this.updateAllPositionsFast();
             }
         }, this.config.fastUpdateInterval);
         
-        logger.info(`📊 Price monitoring started (${this.config.fastUpdateInterval}ms intervals)`);
+        // Slower fallback updates using Jupiter (1 minute)
+        setInterval(async () => {
+            if (this.positions.size > 0 && this.tradingBot) {
+                await this.updateAllPositionsSlow();
+            }
+        }, this.config.slowUpdateInterval);
+        
+        logger.info(`📊 Enhanced price monitoring started:`);
+        logger.info(`   🔧 Manual RPC: ${this.config.fastUpdateInterval}ms intervals`);
+        logger.info(`   🪐 Jupiter fallback: ${this.config.slowUpdateInterval}ms intervals`);
     }
 
-    async updateAllPositions() {
+    // 🚀 NEW: Log price source stats every minute
+    startPriceStatsLogging() {
+        setInterval(() => {
+            const manual = this.priceUpdateStats.manual;
+            const jupiter = this.priceUpdateStats.jupiter;
+            
+            if (manual.attempts > 0 || jupiter.attempts > 0) {
+                const manualSuccess = manual.attempts > 0 ? ((manual.successes / manual.attempts) * 100).toFixed(1) : '0';
+                const jupiterSuccess = jupiter.attempts > 0 ? ((jupiter.successes / jupiter.attempts) * 100).toFixed(1) : '0';
+                const manualAvg = manual.successes > 0 ? (manual.totalTime / manual.successes).toFixed(0) : 'N/A';
+                const jupiterAvg = jupiter.successes > 0 ? (jupiter.totalTime / jupiter.successes).toFixed(0) : 'N/A';
+                
+                logger.info('📊 POSITION PRICE UPDATE STATS:');
+                logger.info(`   🔧 Manual: ${manual.successes}/${manual.attempts} (${manualSuccess}%) avg: ${manualAvg}ms`);
+                logger.info(`   🪐 Jupiter: ${jupiter.successes}/${jupiter.attempts} (${jupiterSuccess}%) avg: ${jupiterAvg}ms`);
+                
+                // Reset stats
+                this.priceUpdateStats.manual = { attempts: 0, successes: 0, totalTime: 0 };
+                this.priceUpdateStats.jupiter = { attempts: 0, successes: 0, totalTime: 0 };
+            }
+        }, 60000); // Every minute
+    }
+
+    // 🚀 FAST: Update all positions using manual RPC method
+    async updateAllPositionsFast() {
         for (const position of this.positions.values()) {
             try {
-                // Get current price from Jupiter
-                const currentPrice = await this.tradingBot.getTokenPriceManual(position.tokenAddress);
+                // Try manual price calculation first (fast)
+                const currentPrice = await this.getPositionPriceManual(position);
                 
                 if (currentPrice && currentPrice !== position.currentPrice) {
-                    await this.updatePositionPrice(position, currentPrice);
-                    this.stats.priceUpdates++;
+                    await this.updatePositionPrice(position, currentPrice, 'manual');
                     
-                    // Check triggers
+                    // Check triggers after price update
                     await this.checkStopLoss(position);
                     await this.checkTakeProfits(position);
                 }
                 
             } catch (error) {
-                logger.debug(`Price update failed for ${position.symbol}: ${error.message}`);
+                logger.debug(`Fast price update failed for ${position.symbol}: ${error.message}`);
             }
         }
     }
 
-    async updatePositionPrice(position, newPrice) {
+    // 🪐 SLOW: Update all positions using Jupiter fallback (if manual failed recently)
+    async updateAllPositionsSlow() {
+        for (const position of this.positions.values()) {
+            try {
+                // Only use Jupiter if manual method hasn't updated recently
+                const timeSinceLastUpdate = Date.now() - (position.lastPriceUpdate || 0);
+                
+                if (timeSinceLastUpdate > 30000) { // If no update in 30 seconds
+                    logger.debug(`📡 Using Jupiter fallback for ${position.symbol} (no recent manual update)`);
+                    
+                    const currentPrice = await this.getPositionPriceJupiter(position);
+                    
+                    if (currentPrice && currentPrice !== position.currentPrice) {
+                        await this.updatePositionPrice(position, currentPrice, 'jupiter');
+                        
+                        // Check triggers after price update
+                        await this.checkStopLoss(position);
+                        await this.checkTakeProfits(position);
+                    }
+                }
+                
+            } catch (error) {
+                logger.debug(`Jupiter fallback price update failed for ${position.symbol}: ${error.message}`);
+            }
+        }
+    }
+
+    // 🔧 Get position price using WORKING manual RPC method from debugPrice.js
+    async getPositionPriceManual(position) {
+        const startTime = Date.now();
+        this.priceUpdateStats.manual.attempts++;
+        
+        try {
+            // Use the WORKING manual price method from debugPrice.js
+            // Note: This requires poolAddress to be stored in position data
+            const poolAddress = position.poolAddress || position.alert?.poolAddress;
+            
+            if (!poolAddress) {
+                // If no pool address, fall back to Jupiter method
+                logger.debug(`No pool address for ${position.symbol}, skipping manual method`);
+                return null;
+            }
+            
+            const price = await this.tradingBot.getTokenPriceViaManualRPC(position.tokenAddress, poolAddress);
+            
+            if (price) {
+                const duration = Date.now() - startTime;
+                this.priceUpdateStats.manual.successes++;
+                this.priceUpdateStats.manual.totalTime += duration;
+                this.stats.manualPriceUpdates++;
+                
+                logger.debug(`🔧 Manual price for ${position.symbol}: ${price.toFixed(8)} SOL (${duration}ms)`);
+                return price;
+            }
+            
+            return null;
+            
+        } catch (error) {
+            logger.debug(`Manual price failed for ${position.symbol}: ${error.message}`);
+            return null;
+        }
+    }
+
+    // 🪐 Get position price using Jupiter fallback
+    async getPositionPriceJupiter(position) {
+        const startTime = Date.now();
+        this.priceUpdateStats.jupiter.attempts++;
+        
+        try {
+            // Use enhanced trading bot's Jupiter price method
+            const price = await this.tradingBot.getTokenPriceViaJupiter(position.tokenAddress);
+            
+            if (price) {
+                const duration = Date.now() - startTime;
+                this.priceUpdateStats.jupiter.successes++;
+                this.priceUpdateStats.jupiter.totalTime += duration;
+                this.stats.jupiterPriceUpdates++;
+                
+                logger.debug(`🪐 Jupiter price for ${position.symbol}: ${price.toFixed(8)} SOL (${duration}ms)`);
+                return price;
+            }
+            
+            return null;
+            
+        } catch (error) {
+            logger.debug(`Jupiter price failed for ${position.symbol}: ${error.message}`);
+            return null;
+        }
+    }
+
+    // 🚀 ENHANCED: Update position price with source tracking
+    async updatePositionPrice(position, newPrice, source = 'unknown') {
         const remainingTokens = parseFloat(position.remainingQuantity);
         const currentValue = remainingTokens * newPrice;
         const investedValue = (remainingTokens / parseFloat(position.quantity)) * position.investedAmount;
         const unrealizedPnL = currentValue - investedValue;
         const priceChange = ((newPrice - position.entryPrice) / position.entryPrice) * 100;
 
+        // Track price history
+        if (!position.priceHistory) {
+            position.priceHistory = [];
+        }
+        
+        position.priceHistory.push({
+            timestamp: Date.now(),
+            price: newPrice,
+            source: source
+        });
+        
+        // Keep only last 100 price updates
+        if (position.priceHistory.length > 100) {
+            position.priceHistory = position.priceHistory.slice(-100);
+        }
+
         position.currentPrice = newPrice;
         position.currentValue = currentValue;
         position.unrealizedPnL = unrealizedPnL;
         position.priceChange = priceChange;
         position.lastPriceUpdate = Date.now();
+        position.lastPriceSource = source;
 
         this.positions.set(position.id, position);
+        this.stats.priceUpdates++;
         
-        logger.debug(`💰 ${position.symbol}: ${newPrice.toFixed(8)} SOL (${priceChange > 0 ? '+' : ''}${priceChange.toFixed(2)}%)`);
+        // Enhanced logging with source information
+        const sourceIcon = source === 'manual' ? '🔧' : source === 'jupiter' ? '🪐' : '❓';
+        logger.debug(`${sourceIcon} ${position.symbol}: ${newPrice.toFixed(8)} SOL (${priceChange > 0 ? '+' : ''}${priceChange.toFixed(2)}%) via ${source}`);
     }
 
-    // Check stop loss trigger
+    // Check stop loss trigger (unchanged)
     async checkStopLoss(position) {
         if (!position.stopLossPrice || !position.currentPrice) return;
         
@@ -97,13 +254,21 @@ class PositionManager extends EventEmitter {
             try {
                 await this.tradingBot.sellPosition(position.id, 100, 'Stop Loss');
                 this.stats.stopLossTriggered++;
+                
+                this.emit('stopLossTriggered', {
+                    position: position,
+                    triggerPrice: position.currentPrice,
+                    lossPercentage: Math.abs(lossPercent),
+                    priceSource: position.lastPriceSource
+                });
+                
             } catch (error) {
                 logger.error(`Stop loss sell failed: ${error.message}`);
             }
         }
     }
 
-    // Check take profit triggers
+    // Check take profit triggers (unchanged)
     async checkTakeProfits(position) {
         if (!position.takeProfitLevels || !position.currentPrice) return;
         
@@ -120,6 +285,16 @@ class PositionManager extends EventEmitter {
                 try {
                     await this.tradingBot.sellPosition(position.id, tp.sellPercentage, `Take Profit (+${tp.percentage}%)`);
                     this.stats.takeProfitTriggered++;
+                    
+                    this.emit('takeProfitTriggered', {
+                        position: position,
+                        level: tp.level,
+                        triggerPrice: position.currentPrice,
+                        gainPercentage: gainPercent,
+                        sellPercentage: tp.sellPercentage,
+                        priceSource: position.lastPriceSource
+                    });
+                    
                 } catch (error) {
                     logger.error(`Take profit sell failed: ${error.message}`);
                     tp.triggered = false;
@@ -128,7 +303,7 @@ class PositionManager extends EventEmitter {
         }
     }
 
-    // Add new position
+    // Add new position (enhanced with price source tracking)
     async addPosition(position) {
         this.validatePosition(position);
         
@@ -145,13 +320,20 @@ class PositionManager extends EventEmitter {
             currentValue: position.investedAmount,
             unrealizedPnL: 0,
             priceChange: 0,
-            lastPriceUpdate: Date.now()
+            lastPriceUpdate: Date.now(),
+            lastPriceSource: position.priceSource || 'entry',
+            priceHistory: [{
+                timestamp: Date.now(),
+                price: position.entryPrice,
+                source: 'entry'
+            }]
         };
         
         this.positions.set(position.id, enhancedPosition);
         await this.savePositions();
         
-        logger.info(`📈 Position: ${position.symbol} @ ${position.entryPrice.toFixed(8)} SOL`);
+        const priceSourceInfo = position.priceSource ? ` (${position.priceSource})` : '';
+        logger.info(`📈 Position: ${position.symbol} @ ${position.entryPrice.toFixed(8)} SOL${priceSourceInfo}`);
         if (position.stopLossPrice) {
             logger.info(`📉 Stop Loss: ${position.stopLossPrice.toFixed(8)} SOL`);
         }
@@ -163,7 +345,7 @@ class PositionManager extends EventEmitter {
         return enhancedPosition;
     }
 
-    // Update position after sell
+    // Update position after sell (unchanged but with enhanced logging)
     async updatePositionAfterSell(positionId, sellQuantity, soldValue, pnl, txHash, reason = 'Manual') {
         const position = this.positions.get(positionId);
         if (!position) throw new Error(`Position ${positionId} not found`);
@@ -186,7 +368,8 @@ class PositionManager extends EventEmitter {
             this.closedPositions.set(positionId, updatedPosition);
             this.positions.delete(positionId);
 
-            logger.info(`📉 CLOSED: ${position.symbol} - PnL: ${updatedPosition.totalPnL.toFixed(4)} SOL`);
+            const priceSourceInfo = position.lastPriceSource ? ` (${position.lastPriceSource})` : '';
+            logger.info(`📉 CLOSED: ${position.symbol} - PnL: ${updatedPosition.totalPnL.toFixed(4)} SOL${priceSourceInfo}`);
             this.emit('positionClosed', updatedPosition);
         } else {
             this.positions.set(positionId, updatedPosition);
@@ -198,7 +381,7 @@ class PositionManager extends EventEmitter {
         return updatedPosition;
     }
 
-    // Get performance summary
+    // Get enhanced performance summary
     getPerformanceStats() {
         const activePositions = Array.from(this.positions.values());
         const closedPositions = Array.from(this.closedPositions.values());
@@ -216,6 +399,10 @@ class PositionManager extends EventEmitter {
         const totalUnrealizedPnL = activePositions.reduce((sum, pos) => sum + (pos.unrealizedPnL || 0), 0);
         const totalRealizedPnL = [...activePositions, ...closedPositions].reduce((sum, pos) => sum + pos.totalPnL, 0);
 
+        // Calculate price source distribution
+        const manualPricePositions = activePositions.filter(pos => pos.lastPriceSource === 'manual').length;
+        const jupiterPricePositions = activePositions.filter(pos => pos.lastPriceSource === 'jupiter').length;
+
         return {
             totalPositions: totalTrades,
             activePositions: activePositions.length,
@@ -224,19 +411,37 @@ class PositionManager extends EventEmitter {
             totalInvested: totalInvested.toFixed(4) + ' SOL',
             totalUnrealizedPnL: totalUnrealizedPnL.toFixed(4) + ' SOL',
             totalRealizedPnL: totalRealizedPnL.toFixed(4) + ' SOL',
-            stopLossTriggered: this.stats.stopLossTriggered,
-            takeProfitTriggered: this.stats.takeProfitTriggered,
-            priceUpdates: this.stats.priceUpdates
+            
+            // Enhanced stats
+            priceUpdates: {
+                total: this.stats.priceUpdates,
+                manual: this.stats.manualPriceUpdates,
+                jupiter: this.stats.jupiterPriceUpdates,
+                failures: this.stats.priceUpdateFailures
+            },
+            
+            currentPriceSources: {
+                manual: manualPricePositions,
+                jupiter: jupiterPricePositions,
+                unknown: activePositions.length - manualPricePositions - jupiterPricePositions
+            },
+            
+            triggers: {
+                stopLossTriggered: this.stats.stopLossTriggered,
+                takeProfitTriggered: this.stats.takeProfitTriggered
+            }
         };
     }
 
-    // Save/load positions
+    // Save/load positions (unchanged)
     async savePositions() {
         try {
             const data = {
                 active: Object.fromEntries(this.positions),
                 closed: Object.fromEntries(this.closedPositions),
-                lastSaved: new Date().toISOString()
+                lastSaved: new Date().toISOString(),
+                stats: this.stats,
+                priceUpdateStats: this.priceUpdateStats
             };
             
             await fs.writeFile(path.resolve(this.config.positionsFile), JSON.stringify(data, null, 2));
@@ -262,6 +467,10 @@ class PositionManager extends EventEmitter {
                 }
             }
             
+            if (savedData.stats) {
+                this.stats = { ...this.stats, ...savedData.stats };
+            }
+            
             logger.info(`📊 Loaded ${this.positions.size} active, ${this.closedPositions.size} closed positions`);
             
         } catch (error) {
@@ -280,7 +489,7 @@ class PositionManager extends EventEmitter {
         if (parseFloat(position.investedAmount) <= 0) throw new Error('Investment must be > 0');
     }
 
-    // Helper methods
+    // Helper methods (unchanged)
     hasPosition(tokenAddress) {
         return Array.from(this.positions.values()).some(pos => pos.tokenAddress === tokenAddress);
     }
@@ -291,6 +500,41 @@ class PositionManager extends EventEmitter {
 
     getActivePositionsCount() {
         return this.positions.size;
+    }
+
+    // 🚀 NEW: Get detailed position info with price history
+    getPositionDetails(positionId) {
+        const position = this.positions.get(positionId) || this.closedPositions.get(positionId);
+        
+        if (!position) {
+            return null;
+        }
+
+        return {
+            ...position,
+            priceHistory: position.priceHistory || [],
+            priceSourceDistribution: this.calculatePriceSourceDistribution(position.priceHistory || [])
+        };
+    }
+
+    // 🚀 NEW: Calculate price source distribution for a position
+    calculatePriceSourceDistribution(priceHistory) {
+        const sources = priceHistory.reduce((acc, update) => {
+            acc[update.source] = (acc[update.source] || 0) + 1;
+            return acc;
+        }, {});
+
+        const total = priceHistory.length;
+        const distribution = {};
+        
+        for (const [source, count] of Object.entries(sources)) {
+            distribution[source] = {
+                count: count,
+                percentage: total > 0 ? ((count / total) * 100).toFixed(1) + '%' : '0%'
+            };
+        }
+
+        return distribution;
     }
 }
 

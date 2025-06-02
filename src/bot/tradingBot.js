@@ -1,10 +1,11 @@
-// src/bot/tradingBot.js - FIXED: Price-based stop loss and take profits
-const { Connection, PublicKey, Keypair, Transaction, sendAndConfirmTransaction, ComputeBudgetProgram, VersionedTransaction } = require('@solana/web3.js');
+// src/bot/tradingBot.js - SIMPLE: Auto pool discovery + debugPrice method + Jupiter fallback
+const { Connection, PublicKey, Keypair, VersionedTransaction } = require('@solana/web3.js');
+const { AccountLayout } = require('@solana/spl-token');
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
 const axios = require('axios');
-
-// Use anchor's bs58 since it's working
+const http = require('http');
+const https = require('https');
 const { bs58 } = require('@coral-xyz/anchor/dist/cjs/utils/bytes');
 
 class TradingBot extends EventEmitter {
@@ -19,19 +20,45 @@ class TradingBot extends EventEmitter {
             rpcUrl: process.env.SOLANA_RPC_URL || process.env.HELIUS_RPC_URL || 'https://api.mainnet-beta.solana.com',
             privateKey: process.env.PRIVATE_KEY,
             takeProfitLevels: [
-                { percentage: 100, sellPercentage: 50 },  // 2x (100% gain) - sell 50%
-                { percentage: 300, sellPercentage: 25 },  // 4x (300% gain) - sell 25%
-                { percentage: 900, sellPercentage: 100 }  // 10x (900% gain) - sell remaining
+                { percentage: 100, sellPercentage: 50 },  // 2x - sell 50%
+                { percentage: 300, sellPercentage: 25 },  // 4x - sell 25%
+                { percentage: 900, sellPercentage: 100 }  // 10x - sell rest
             ]
         };
 
         this.positionManager = config.positionManager;
         this.connection = new Connection(this.config.rpcUrl, 'confirmed');
         
-        // Jupiter configuration
+        // Jupiter API configuration
         this.JUPITER_API_URL = 'https://quote-api.jup.ag/v6';
-        this.JUPITER_PRICE_API = 'https://price.jup.ag/v6';
         this.SOL_MINT = 'So11111111111111111111111111111111111111112';
+        
+        // 🚀 OPTIMIZED: Persistent HTTP connections with keep-alive
+        this.httpClient = axios.create({
+            timeout: 5000,
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (compatible; TradingBot/1.0)',
+                'Connection': 'keep-alive',
+                'Accept': 'application/json',
+                'Accept-Encoding': 'gzip, deflate, br'
+            },
+            // HTTP Keep-Alive agents for persistent connections
+            httpAgent: new http.Agent({ 
+                keepAlive: true,
+                maxSockets: 10,           // Max concurrent connections
+                maxFreeSockets: 5,        // Keep 5 connections open
+                keepAliveMsecs: 30000,    // Keep alive for 30 seconds
+                timeout: 5000
+            }),
+            httpsAgent: new https.Agent({ 
+                keepAlive: true,
+                maxSockets: 10,
+                maxFreeSockets: 5,
+                keepAliveMsecs: 30000,
+                timeout: 5000,
+                rejectUnauthorized: true
+            })
+        });
         
         // Initialize wallet for live trading
         this.wallet = null;
@@ -39,30 +66,35 @@ class TradingBot extends EventEmitter {
             this.wallet = this.initializeWallet();
         }
         
-        // 🪐 JUPITER PRICE CACHING
+        // Price caching
         this.priceCache = new Map();
-        this.priceCacheTimeout = 3000; // 3 seconds - Jupiter updates every 2-3 seconds
-        this.isTradingEnabled = true;
-        this.isInitialized = false;
+        this.priceCacheTimeout = 3000; // 3 seconds
         
+        // Initialize PumpSwap SDK
+        this.pumpAmmSdk = null;
+        this.initializePumpSDK();
+        
+        // Statistics
         this.stats = {
             alertsProcessed: 0,
             tradesExecuted: 0,
             buyOrders: 0,
             sellOrders: 0,
             totalPnL: 0,
-            priceUpdates: 0,
+            manualPrices: 0,
             jupiterPrices: 0,
             priceFailures: 0,
-            liveTradesExecuted: 0,
-            paperTradesExecuted: 0,
-            jupiterQuotes: 0,
-            jupiterSwaps: 0,
-            priceApiCalls: 0,
+            poolsFound: 0,
+            poolsNotFound: 0,
+            httpRequests: 0,
+            httpKeepAliveUsed: 0,
             errors: 0
         };
 
-        this.initialize();
+        this.isTradingEnabled = true;
+        this.isInitialized = false;
+        
+        logger.info('🚀 HTTP Keep-Alive connections initialized for faster API calls');
     }
 
     initializeWallet() {
@@ -85,18 +117,23 @@ class TradingBot extends EventEmitter {
         }
     }
 
+    async initializePumpSDK() {
+        try {
+            const { PumpAmmSdk } = require('@pump-fun/pump-swap-sdk');
+            this.pumpAmmSdk = new PumpAmmSdk(this.connection);
+            logger.info('✅ PumpSwap SDK initialized');
+        } catch (error) {
+            logger.warn('⚠️ PumpSwap SDK not available:', error.message);
+            this.pumpAmmSdk = null;
+        }
+    }
+
     async initialize() {
         try {
-            logger.info('🔧 Initializing trading bot with fixed price-based stop loss/take profits...');
+            logger.info('🔧 Initializing simple trading bot...');
             logger.info(`💰 Trading mode: ${this.config.tradingMode.toUpperCase()}`);
-            logger.info(`📊 Stop Loss: -${this.config.stopLossPercentage}% from entry price`);
-            logger.info(`🎯 Take Profits: +${this.config.takeProfitLevels.map(tp => tp.percentage + '%').join(', ')} from entry price`);
-            
-            if (this.config.tradingMode === 'live') {
-                logger.info(`🚀 LIVE TRADING: ✅ Real Jupiter swaps will be executed`);
-            } else {
-                logger.info(`📝 PAPER TRADES: ✅ Simulating Jupiter swaps without execution`);
-            }
+            logger.info(`🎯 Price System: Auto Pool Discovery + Manual Calculation + Jupiter Fallback`);
+            logger.info(`🚀 HTTP: Keep-Alive connections for faster API calls`);
             
             const blockHeight = await this.connection.getBlockHeight();
             logger.info(`📡 Connected to Solana (block: ${blockHeight})`);
@@ -106,50 +143,156 @@ class TradingBot extends EventEmitter {
                 logger.info(`💰 Wallet balance: ${(balance / 1e9).toFixed(4)} SOL`);
             }
 
-            // Test Jupiter APIs
-            await this.testJupiterConnections();
-
             this.isInitialized = true;
-            logger.info('✅ Trading bot initialized with FIXED price-based triggers');
+            logger.info('✅ Simple trading bot initialized');
         } catch (error) {
             logger.error('❌ Failed to initialize:', error);
             throw error;
         }
     }
 
-    async testJupiterConnections() {
+    // 🔍 STEP 1: Find pool address using DexScreener API with persistent connections
+    async findPoolAddress(tokenAddress) {
         try {
-            logger.info('🧪 Testing Jupiter Quote API connection...');
+            const startTime = Date.now();
+            logger.debug(`🔍 Finding pool for token ${tokenAddress} (keep-alive)...`);
             
-            // 🔥 FIXED: Test Quote API only (remove broken Price API test)
-            const quoteResponse = await axios.get(`${this.JUPITER_API_URL}/quote`, {
-                params: {
-                    inputMint: this.SOL_MINT,
-                    outputMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
-                    amount: 1000000, // 0.001 SOL
-                    slippageBps: 50
-                },
-                timeout: 5000
-            });
+            this.stats.httpRequests++;
             
-            if (quoteResponse.data && quoteResponse.data.outAmount) {
-                logger.info('✅ Jupiter Quote API connection successful');
-                this.stats.jupiterQuotes++;
+            // Use persistent HTTP client for faster requests
+            const response = await this.httpClient.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
+            
+            // Check if keep-alive was used (connection reused)
+            const isKeepAlive = response.request?.connection?.reusedSocket;
+            if (isKeepAlive) {
+                this.stats.httpKeepAliveUsed++;
+                logger.debug('🔗 Keep-alive connection reused');
             }
             
-            // 🔥 Test actual price fetching via Quote API
-            logger.info('🧪 Testing price fetching via Quote API...');
-            const testPrice = await this.getTokenPriceViaQuote('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
-            logger.info(`✅ Quote API price test: ${testPrice.toFixed(8)} SOL`);
+            const duration = Date.now() - startTime;
+            
+            if (response.data && response.data.pairs && response.data.pairs.length > 0) {
+                // Find SOL pairs only
+                const solPairs = response.data.pairs.filter(pair => 
+                    pair.quoteToken && 
+                    (pair.quoteToken.symbol === 'SOL' || pair.quoteToken.symbol === 'WSOL')
+                );
+                
+                if (solPairs.length > 0) {
+                    // Get the most liquid pair
+                    const bestPair = solPairs.sort((a, b) => {
+                        const liquidityA = parseFloat(a.liquidity?.usd || '0');
+                        const liquidityB = parseFloat(b.liquidity?.usd || '0');
+                        return liquidityB - liquidityA;
+                    })[0];
+                    
+                    this.stats.poolsFound++;
+                    logger.debug(`✅ Pool found: ${bestPair.pairAddress} (${duration}ms, ${bestPair.dexId}, ${bestPair.liquidity?.usd || 'N/A'})`);
+                    return bestPair.pairAddress;
+                }
+            }
+            
+            this.stats.poolsNotFound++;
+            logger.debug(`❌ No SOL pool found for ${tokenAddress} (${duration}ms)`);
+            return null;
             
         } catch (error) {
-            logger.warn('⚠️ Jupiter Quote API test failed:', error.message);
-            logger.warn('Will retry on actual usage...');
+            this.stats.poolsNotFound++;
+            logger.debug(`❌ Pool discovery failed: ${error.message}`);
+            return null;
         }
     }
 
-    // 🪐 Get token price using Jupiter Price API
-    async getTokenPrice(tokenAddress, forceRefresh = false, priority = 'normal', poolAddress = null) {
+    // 🔧 STEP 2: Calculate price using debugPrice method (WORKING!)
+    async calculatePriceFromPool(tokenAddress, poolAddress) {
+        try {
+            if (!this.pumpAmmSdk) {
+                throw new Error('PumpSwap SDK not available');
+            }
+
+            logger.debug(`🔧 Calculating price using pool ${poolAddress}...`);
+
+            // Fetch pool data
+            const pool = await this.pumpAmmSdk.fetchPool(new PublicKey(poolAddress));
+            if (!pool) {
+                throw new Error('Pool not found');
+            }
+
+            // Get token account data from Solana RPC
+            const [baseAccountInfo, quoteAccountInfo] = await Promise.all([
+                this.connection.getAccountInfo(pool.poolBaseTokenAccount),
+                this.connection.getAccountInfo(pool.poolQuoteTokenAccount)
+            ]);
+            
+            if (!baseAccountInfo || !quoteAccountInfo) {
+                throw new Error('Token account data not found');
+            }
+
+            // Parse token amounts using SPL Token layout
+            const baseTokenData = AccountLayout.decode(baseAccountInfo.data);
+            const quoteTokenData = AccountLayout.decode(quoteAccountInfo.data);
+            
+            // Convert to readable amounts (exactly like debugPrice.js)
+            const baseAmount = parseFloat(baseTokenData.amount.toString()) / Math.pow(10, 6); // Token: 6 decimals
+            const quoteAmount = parseFloat(quoteTokenData.amount.toString()) / Math.pow(10, 9); // SOL: 9 decimals
+            
+            if (baseAmount <= 0 || quoteAmount <= 0) {
+                throw new Error(`Invalid pool reserves: ${baseAmount} tokens, ${quoteAmount} SOL`);
+            }
+
+            // Calculate price (exactly like debugPrice.js)
+            const price = quoteAmount / baseAmount;
+            
+            this.stats.manualPrices++;
+            logger.debug(`✅ Manual price: ${price.toFixed(12)} SOL (${baseAmount.toFixed(2)} tokens, ${quoteAmount.toFixed(6)} SOL)`);
+            
+            return price;
+
+        } catch (error) {
+            logger.debug(`❌ Manual price calculation failed: ${error.message}`);
+            return null;
+        }
+    }
+
+    // 🪐 STEP 3: Jupiter fallback price with persistent connections
+    async getJupiterPrice(tokenAddress) {
+        try {
+            logger.debug(`🪐 Getting Jupiter fallback price for ${tokenAddress}...`);
+            
+            const testAmount = 1000000; // 0.001 SOL
+            
+            this.stats.httpRequests++;
+            
+            // Use persistent HTTP client for Jupiter API too
+            const quote = await this.httpClient.get(`${this.JUPITER_API_URL}/quote`, {
+                params: {
+                    inputMint: this.SOL_MINT,
+                    outputMint: tokenAddress,
+                    amount: testAmount,
+                    slippageBps: 50
+                }
+            });
+
+            if (!quote.data || !quote.data.outAmount) {
+                throw new Error('No Jupiter quote received');
+            }
+
+            const tokensReceived = parseFloat(quote.data.outAmount) / Math.pow(10, 6); // Assume 6 decimals
+            const price = (testAmount / 1e9) / tokensReceived;
+
+            this.stats.jupiterPrices++;
+            logger.debug(`✅ Jupiter price: ${price.toFixed(12)} SOL`);
+            
+            return price;
+
+        } catch (error) {
+            logger.debug(`❌ Jupiter price failed: ${error.message}`);
+            return null;
+        }
+    }
+
+    // 🧠 MAIN: Smart price fetching with auto pool discovery
+    async getTokenPrice(tokenAddress, forceRefresh = false) {
         try {
             const now = Date.now();
             
@@ -160,287 +303,80 @@ class TradingBot extends EventEmitter {
                     return cached.price;
                 }
             }
-    
-            logger.debug(`🪐 Getting Jupiter price for ${tokenAddress} via Quote API...`);
-    
-            // 🔥 SKIP BROKEN PRICE API - GO DIRECTLY TO QUOTE API
-            const price = await this.getTokenPriceViaQuote(tokenAddress);
-    
-            // Cache the price
+
+            logger.debug(`💰 Getting price for ${tokenAddress}...`);
+            let price = null;
+            let source = 'unknown';
+
+            // METHOD 1: Auto discover pool + manual calculation (FAST!)
+            const poolAddress = await this.findPoolAddress(tokenAddress);
+            if (poolAddress) {
+                price = await this.calculatePriceFromPool(tokenAddress, poolAddress);
+                if (price) {
+                    source = 'manual';
+                }
+            }
+
+            // METHOD 2: Jupiter fallback (SLOWER but reliable)
+            if (!price) {
+                logger.debug(`🔄 Manual method failed, trying Jupiter fallback...`);
+                price = await this.getJupiterPrice(tokenAddress);
+                if (price) {
+                    source = 'jupiter';
+                }
+            }
+
+            if (!price) {
+                this.stats.priceFailures++;
+                throw new Error('All price methods failed');
+            }
+
+            // Cache the result
             this.priceCache.set(tokenAddress, {
                 price: price,
                 timestamp: now,
-                source: 'Jupiter Quote API'
+                source: source
             });
-    
-            this.stats.jupiterPrices++;
-            this.stats.priceUpdates++;
-    
-            logger.debug(`✅ Jupiter quote price: ${price.toFixed(12)} SOL`);
+
+            logger.debug(`✅ Final price: ${price.toFixed(12)} SOL via ${source}`);
             return price;
-    
+
         } catch (error) {
-            logger.error(`❌ Jupiter price error for ${tokenAddress}: ${error.message}`);
             this.stats.priceFailures++;
             this.stats.errors++;
+            logger.error(`❌ Price fetch failed for ${tokenAddress}: ${error.message}`);
             throw error;
         }
     }
 
-    // 🪐 Fallback price method using Jupiter quote
-    async getTokenPriceViaQuote(tokenAddress) {
-        try {
-            const testAmount = 1000000; // 0.001 SOL in lamports
-            
-            const quote = await this.getJupiterQuote(
-                this.SOL_MINT,
-                tokenAddress,
-                testAmount
-            );
-    
-            // Handle different token decimals properly
-            let decimals = 6; // Default assumption
-            
-            // For well-known tokens, use correct decimals
-            if (tokenAddress === 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v') decimals = 6; // USDC
-            if (tokenAddress === 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB') decimals = 6; // USDT
-            if (tokenAddress === 'So11111111111111111111111111111111111111112') decimals = 9; // SOL
-    
-            const tokensReceived = parseFloat(quote.outAmount) / Math.pow(10, decimals);
-            const price = (testAmount / 1e9) / tokensReceived;
-    
-            logger.debug(`✅ Quote-based price: ${price.toFixed(12)} SOL (${tokensReceived} tokens for 0.001 SOL)`);
-            return price;
-    
-        } catch (error) {
-            throw new Error(`Quote method failed: ${error.message}`);
-        }
-    }
-
-    // Get token price manually for position manager (Jupiter API)
+    // Helper method for position manager
     async getTokenPriceManual(tokenAddress, poolAddress = null) {
         try {
-            return await this.getTokenPrice(tokenAddress, true, 'normal', poolAddress);
+            return await this.getTokenPrice(tokenAddress, true);
         } catch (error) {
-            logger.debug(`Manual Jupiter price fetch failed for ${tokenAddress}:`, error.message);
+            logger.debug(`Position manager price fetch failed: ${error.message}`);
             return null;
         }
     }
 
-    // 🪐 Get Jupiter quote for swap
-    async getJupiterQuote(inputMint, outputMint, amount, slippageBps = null) {
-        try {
-            const slippage = slippageBps || (this.config.slippageTolerance * 100); // Convert % to BPS
-            
-            const params = {
-                inputMint,
-                outputMint,
-                amount: Math.floor(amount).toString(),
-                slippageBps: slippage,
-                onlyDirectRoutes: false,
-                asLegacyTransaction: false
-            };
-
-            logger.debug(`🪐 Jupiter quote: ${amount} ${inputMint.substring(0, 8)} → ${outputMint.substring(0, 8)}`);
-
-            const response = await axios.get(`${this.JUPITER_API_URL}/quote`, {
-                params,
-                timeout: 10000
-            });
-
-            if (!response.data) {
-                throw new Error('No quote received from Jupiter');
-            }
-
-            this.stats.jupiterQuotes++;
-            
-            const quote = response.data;
-            logger.debug(`✅ Jupiter quote: ${quote.outAmount} (${quote.routePlan?.length || 0} routes)`);
-            
-            return quote;
-
-        } catch (error) {
-            logger.error(`❌ Jupiter quote failed: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // 🪐 Execute Jupiter swap
-    async executeJupiterSwap(quote, priorityFee = 10000) {
-        try {
-            if (!this.wallet) {
-                throw new Error('Wallet not initialized for live trading');
-            }
-
-            logger.info(`🪐 Executing Jupiter swap...`);
-
-            // Get swap transaction from Jupiter
-            const swapResponse = await axios.post(`${this.JUPITER_API_URL}/swap`, {
-                quoteResponse: quote,
-                userPublicKey: this.wallet.publicKey.toString(),
-                wrapAndUnwrapSol: true,
-                dynamicComputeUnitLimit: true,
-                prioritizationFeeLamports: priorityFee
-            }, {
-                timeout: 15000
-            });
-
-            if (!swapResponse.data || !swapResponse.data.swapTransaction) {
-                throw new Error('No swap transaction received from Jupiter');
-            }
-
-            // Deserialize the transaction
-            const swapTransactionBuf = Buffer.from(swapResponse.data.swapTransaction, 'base64');
-            const transaction = VersionedTransaction.deserialize(swapTransactionBuf);
-
-            // Sign the transaction
-            transaction.sign([this.wallet]);
-
-            // Send and confirm transaction
-            logger.info(`📝 Sending Jupiter swap transaction...`);
-            const signature = await this.connection.sendTransaction(transaction, {
-                skipPreflight: false,
-                maxRetries: 3
-            });
-
-            // Confirm transaction
-            const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
-            
-            if (confirmation.value.err) {
-                throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-            }
-
-            logger.info(`✅ Jupiter swap executed! Signature: ${signature}`);
-            this.stats.jupiterSwaps++;
-
-            return signature;
-
-        } catch (error) {
-            logger.error(`❌ Jupiter swap execution failed: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // 🔥 FIXED: Calculate price-based stop loss
+    // Calculate stop loss price
     calculateStopLossPrice(entryPrice) {
-        // Stop loss = entry price * (1 - stop loss percentage / 100)
-        const stopLossPrice = entryPrice * (1 - this.config.stopLossPercentage / 100);
-        
-        logger.debug(`📉 Stop loss: ${entryPrice.toFixed(12)} SOL * (1 - ${this.config.stopLossPercentage}%) = ${stopLossPrice.toFixed(12)} SOL`);
-        
-        return stopLossPrice;
+        return entryPrice * (1 - this.config.stopLossPercentage / 100);
     }
 
-    // 🔥 FIXED: Calculate price-based take profit levels
+    // Calculate take profit prices
     calculateTakeProfitPrices(entryPrice) {
-        const takeProfitLevels = this.config.takeProfitLevels.map((level, index) => {
-            // Take profit price = entry price * (1 + percentage / 100)
-            const targetPrice = entryPrice * (1 + level.percentage / 100);
-            
-            logger.debug(`📈 TP${index + 1}: ${entryPrice.toFixed(12)} SOL * (1 + ${level.percentage}%) = ${targetPrice.toFixed(12)} SOL (sell ${level.sellPercentage}%)`);
-            
-            return {
-                targetPrice: targetPrice,
-                sellPercentage: level.sellPercentage,
-                percentage: level.percentage,
-                triggered: false,
-                level: index + 1
-            };
-        });
-
-        return takeProfitLevels;
+        return this.config.takeProfitLevels.map((level, index) => ({
+            targetPrice: entryPrice * (1 + level.percentage / 100),
+            sellPercentage: level.sellPercentage,
+            percentage: level.percentage,
+            triggered: false,
+            level: index + 1
+        }));
     }
 
-    // 🪐 Execute live buy using Jupiter
-    async executeLiveBuy(alert, investmentAmount, currentPrice, expectedTokens) {
-        try {
-            logger.info(`🚀 EXECUTING LIVE BUY WITH JUPITER: ${investmentAmount} SOL → ${alert.token.symbol}`);
-            
-            if (!this.wallet) {
-                throw new Error('Wallet not initialized for live trading');
-            }
-
-            const tokenMint = alert.token.address;
-            const amountLamports = Math.floor(investmentAmount * 1e9); // Convert SOL to lamports
-
-            // Get Jupiter quote
-            const quote = await this.getJupiterQuote(
-                this.SOL_MINT,
-                tokenMint,
-                amountLamports
-            );
-
-            const expectedTokensFromJupiter = parseFloat(quote.outAmount) / Math.pow(10, 6); // Assuming 6 decimals
-            const actualPrice = investmentAmount / expectedTokensFromJupiter;
-
-            logger.info(`💎 Jupiter quote: ${expectedTokensFromJupiter.toFixed(2)} tokens @ ${actualPrice.toFixed(12)} SOL`);
-
-            // Execute the swap
-            const signature = await this.executeJupiterSwap(quote);
-
-            // 🔥 FIXED: Calculate price-based stop loss and take profits
-            const stopLossPrice = this.calculateStopLossPrice(actualPrice);
-            const takeProfitPrices = this.calculateTakeProfitPrices(actualPrice);
-
-            // Create position with FIXED price-based triggers
-            const position = {
-                id: this.generatePositionId(),
-                tokenAddress: alert.token.address,
-                symbol: alert.token.symbol,
-                side: 'LONG',
-                entryPrice: actualPrice,
-                quantity: expectedTokensFromJupiter.toString(),
-                investedAmount: investmentAmount,
-                entryTime: Date.now(),
-                txHash: signature,
-                stopLossPrice: stopLossPrice, // 🔥 FIXED: Price-based stop loss
-                takeProfitLevels: takeProfitPrices, // 🔥 FIXED: Price-based take profits
-                remainingQuantity: expectedTokensFromJupiter.toString(),
-                alert: alert,
-                paperTrade: false, // 🔥 REAL TRADE
-                realPrice: true,
-                executedVia: 'Jupiter',
-                jupiterQuote: quote
-            };
-
-            // Add to position manager
-            if (this.positionManager) {
-                await this.positionManager.addPosition(position);
-            }
-
-            this.stats.tradesExecuted++;
-            this.stats.buyOrders++;
-            this.stats.liveTradesExecuted++;
-
-            logger.info(`🎉 Jupiter buy completed: ${expectedTokensFromJupiter.toFixed(2)} ${alert.token.symbol} @ ${actualPrice.toFixed(12)} SOL`);
-            logger.info(`📉 Stop loss set at: ${stopLossPrice.toFixed(12)} SOL (-${this.config.stopLossPercentage}%)`);
-            logger.info(`📈 Take profits: ${takeProfitPrices.map(tp => `${tp.targetPrice.toFixed(12)} SOL (+${tp.percentage}%)`).join(', ')}`);
-            
-            this.emit('tradeExecuted', {
-                type: 'JUPITER_BUY',
-                symbol: alert.token.symbol,
-                amount: expectedTokensFromJupiter.toString(),
-                price: actualPrice,
-                investmentAmount: investmentAmount,
-                signature: signature,
-                realTrade: true,
-                executedVia: 'Jupiter',
-                stopLossPrice: stopLossPrice,
-                takeProfitPrices: takeProfitPrices
-            });
-
-            return position;
-
-        } catch (error) {
-            logger.error(`❌ Jupiter buy failed for ${alert.token.symbol}:`, error);
-            this.stats.errors++;
-            throw error;
-        }
-    }
-
-    // Paper trade execution (simulate only) - FIXED
+    // Execute paper buy
     async executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens) {
-        // 🔥 FIXED: Calculate price-based stop loss and take profits
         const stopLossPrice = this.calculateStopLossPrice(currentPrice);
         const takeProfitPrices = this.calculateTakeProfitPrices(currentPrice);
 
@@ -454,13 +390,12 @@ class TradingBot extends EventEmitter {
             investedAmount: investmentAmount,
             entryTime: Date.now(),
             txHash: 'PAPER_TRADE_' + Date.now(),
-            stopLossPrice: stopLossPrice, // 🔥 FIXED: Price-based stop loss
-            takeProfitLevels: takeProfitPrices, // 🔥 FIXED: Price-based take profits
+            stopLossPrice: stopLossPrice,
+            takeProfitLevels: takeProfitPrices,
             remainingQuantity: expectedTokens.toString(),
             alert: alert,
             paperTrade: true,
-            realPrice: true,
-            executedVia: 'Paper (Jupiter simulation)'
+            priceSource: this.priceCache.get(alert.token.address)?.source || 'unknown'
         };
 
         if (this.positionManager) {
@@ -469,208 +404,44 @@ class TradingBot extends EventEmitter {
 
         this.stats.tradesExecuted++;
         this.stats.buyOrders++;
-        this.stats.paperTradesExecuted++;
 
-        logger.info(`📝 Paper buy: ${expectedTokens.toFixed(2)} ${alert.token.symbol} @ ${currentPrice.toFixed(12)} SOL (Jupiter price)`);
-        logger.info(`📉 Stop loss set at: ${stopLossPrice.toFixed(12)} SOL (-${this.config.stopLossPercentage}%)`);
-        logger.info(`📈 Take profits: ${takeProfitPrices.map(tp => `${tp.targetPrice.toFixed(12)} SOL (+${tp.percentage}%)`).join(', ')}`);
+        const priceSource = position.priceSource === 'manual' ? 'Manual RPC' : 'Jupiter API';
+        logger.info(`📝 Paper buy: ${expectedTokens.toFixed(2)} ${alert.token.symbol} @ ${currentPrice.toFixed(12)} SOL (${priceSource})`);
         
         this.emit('tradeExecuted', {
             type: 'PAPER_BUY',
             symbol: alert.token.symbol,
             amount: expectedTokens.toString(),
             price: currentPrice,
-            investmentAmount: investmentAmount,
-            signature: position.txHash,
-            realPrice: true,
-            realTrade: false,
-            executedVia: 'Paper (Jupiter simulation)',
-            stopLossPrice: stopLossPrice,
-            takeProfitPrices: takeProfitPrices
+            priceSource: priceSource
         });
 
         return position;
     }
 
-    // Enhanced buy execution with Jupiter integration
+    // Main buy execution
     async executeBuy(alert) {
         try {
             const tokenAddress = alert.token.address;
             const symbol = alert.token.symbol;
-            const investmentAmount = this.calculateInvestmentAmount(alert);
+            const investmentAmount = this.config.initialInvestment;
             
-            logger.info(`💰 Executing BUY: ${investmentAmount} SOL → ${symbol} (${this.config.tradingMode.toUpperCase()} MODE)`);
+            logger.info(`💰 Executing BUY: ${investmentAmount} SOL → ${symbol}`);
 
-            // Get REAL current price using Jupiter Price API
-            let currentPrice;
-            try {
-                currentPrice = await this.getTokenPrice(tokenAddress, true);
-                logger.info(`📊 Jupiter price: ${currentPrice.toFixed(12)} SOL per token`);
-            } catch (priceError) {
-                logger.warn(`⚠️ Could not get Jupiter price: ${priceError.message}`);
-                // For Jupiter, we'll get the actual execution price from the quote
-                currentPrice = 0.000001; // Fallback
-            }
-
+            // Get current price using smart method
+            const currentPrice = await this.getTokenPrice(tokenAddress, true);
             const expectedTokens = investmentAmount / currentPrice;
             
-            logger.info(`💎 Expected trade: ~${expectedTokens.toFixed(2)} ${symbol} (Jupiter will determine exact amount)`);
+            logger.info(`💎 Trade: ${expectedTokens.toFixed(2)} ${symbol} @ ${currentPrice.toFixed(12)} SOL`);
 
-            // 🔥 MODE SWITCHING: Execute based on trading mode
-            if (this.config.tradingMode === 'live') {
-                return await this.executeLiveBuy(alert, investmentAmount, currentPrice, expectedTokens);
-            } else {
-                return await this.executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens);
-            }
+            // For now, only paper trading (live trading would use Jupiter swap here)
+            return await this.executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens);
 
         } catch (error) {
-            logger.error(`❌ Buy execution failed for ${alert.token.symbol}:`, error);
+            logger.error(`❌ Buy execution failed: ${error.message}`);
             this.stats.errors++;
             throw error;
         }
-    }
-
-    // 🪐 Execute live sell using Jupiter
-    async executeLiveSell(position, sellQuantity, reason = 'Manual') {
-        try {
-            logger.info(`🚀 EXECUTING LIVE SELL WITH JUPITER: ${sellQuantity} ${position.symbol} → SOL`);
-            
-            if (!this.wallet) {
-                throw new Error('Wallet not initialized for live trading');
-            }
-
-            const tokenMint = position.tokenAddress;
-            const amountTokens = Math.floor(sellQuantity * Math.pow(10, 6)); // Convert to token units (assuming 6 decimals)
-
-            // Get Jupiter quote for sell
-            const quote = await this.getJupiterQuote(
-                tokenMint,
-                this.SOL_MINT,
-                amountTokens
-            );
-
-            const expectedSOL = parseFloat(quote.outAmount) / 1e9; // Convert lamports to SOL
-            const sellPrice = expectedSOL / sellQuantity;
-
-            logger.info(`💰 Jupiter sell quote: ${sellQuantity} tokens → ${expectedSOL.toFixed(6)} SOL @ ${sellPrice.toFixed(12)} SOL per token`);
-
-            // Execute the swap
-            const signature = await this.executeJupiterSwap(quote);
-
-            // Calculate PnL
-            const soldValue = expectedSOL;
-            const investedPortionValue = (sellQuantity / parseFloat(position.quantity)) * position.investedAmount;
-            const pnl = soldValue - investedPortionValue;
-
-            // Update position
-            if (this.positionManager) {
-                await this.positionManager.updatePositionAfterSell(
-                    position.id,
-                    sellQuantity,
-                    soldValue,
-                    pnl,
-                    signature,
-                    reason
-                );
-            }
-
-            this.stats.sellOrders++;
-            this.stats.liveTradesExecuted++;
-            this.stats.totalPnL += pnl;
-
-            logger.info(`🎉 Jupiter sell completed: ${sellQuantity} ${position.symbol} → ${soldValue.toFixed(6)} SOL (PnL: ${pnl > 0 ? '+' : ''}${pnl.toFixed(6)} SOL)`);
-            
-            this.emit('tradeExecuted', {
-                type: 'JUPITER_SELL',
-                symbol: position.symbol,
-                amount: sellQuantity.toString(),
-                soldValue: soldValue,
-                pnl: pnl,
-                signature: signature,
-                reason: reason,
-                realTrade: true,
-                executedVia: 'Jupiter'
-            });
-
-            return {
-                signature,
-                soldValue,
-                pnl,
-                sellQuantity
-            };
-
-        } catch (error) {
-            logger.error(`❌ Jupiter sell failed for ${position.symbol}:`, error);
-            this.stats.errors++;
-            throw error;
-        }
-    }
-
-    // 🪐 Helper method to sell a position using Jupiter
-    async sellPosition(positionId, sellPercentage, reason = 'Triggered') {
-        try {
-            const position = this.positionManager.positions.get(positionId);
-            if (!position) {
-                throw new Error(`Position ${positionId} not found`);
-            }
-
-            const remainingQuantity = parseFloat(position.remainingQuantity);
-            const sellQuantity = remainingQuantity * (sellPercentage / 100);
-
-            if (this.config.tradingMode === 'live') {
-                return await this.executeLiveSell(position, sellQuantity, reason);
-            } else {
-                // Paper sell logic with Jupiter price
-                let currentPrice;
-                try {
-                    currentPrice = await this.getTokenPrice(position.tokenAddress, true);
-                } catch (error) {
-                    currentPrice = position.currentPrice || position.entryPrice;
-                }
-                
-                const soldValue = sellQuantity * currentPrice;
-                const investedPortionValue = (sellQuantity / parseFloat(position.quantity)) * position.investedAmount;
-                const pnl = soldValue - investedPortionValue;
-
-                logger.info(`📝 Paper sell: ${sellQuantity} ${position.symbol} @ ${currentPrice.toFixed(12)} SOL (${reason}) - Jupiter price`);
-                
-                // Update position through position manager
-                if (this.positionManager) {
-                    await this.positionManager.updatePositionAfterSell(
-                        position.id,
-                        sellQuantity,
-                        soldValue,
-                        pnl,
-                        'PAPER_SELL_' + Date.now(),
-                        reason
-                    );
-                }
-
-                this.stats.sellOrders++;
-                this.stats.paperTradesExecuted++;
-                this.stats.totalPnL += pnl;
-
-                return {
-                    signature: 'PAPER_SELL_' + Date.now(),
-                    soldValue: soldValue,
-                    pnl: pnl,
-                    sellQuantity
-                };
-            }
-
-        } catch (error) {
-            logger.error(`❌ Sell position failed:`, error);
-            throw error;
-        }
-    }
-
-    calculateInvestmentAmount(alert) {
-        let amount = this.config.initialInvestment;
-        if (alert.twitter?.likes >= 1000) amount *= 1.2;
-        if (alert.twitter?.views >= 1000000) amount *= 1.2;
-        if (alert.twitter?.likes >= 5000) amount *= 1.3;
-        if (alert.twitter?.views >= 5000000) amount *= 1.3;
-        return Math.min(amount, this.config.initialInvestment * 2);
     }
 
     generatePositionId() {
@@ -696,6 +467,32 @@ class TradingBot extends EventEmitter {
         }
     }
 
+    getStats() {
+        const keepAliveEfficiency = this.stats.httpRequests > 0 ? 
+            ((this.stats.httpKeepAliveUsed / this.stats.httpRequests) * 100).toFixed(1) : '0';
+
+        return {
+            ...this.stats,
+            config: {
+                mode: this.config.tradingMode,
+                priceMethod: 'Auto Pool Discovery + Manual Calculation + Jupiter Fallback',
+                httpOptimization: 'Keep-Alive Persistent Connections'
+            },
+            pricing: {
+                manualPrices: this.stats.manualPrices,
+                jupiterPrices: this.stats.jupiterPrices,
+                failures: this.stats.priceFailures,
+                poolsFound: this.stats.poolsFound,
+                poolsNotFound: this.stats.poolsNotFound
+            },
+            http: {
+                totalRequests: this.stats.httpRequests,
+                keepAliveUsed: this.stats.httpKeepAliveUsed,
+                keepAliveEfficiency: keepAliveEfficiency + '%'
+            }
+        };
+    }
+
     pauseTrading() {
         this.isTradingEnabled = false;
         logger.info('⏸️ Trading paused');
@@ -706,55 +503,19 @@ class TradingBot extends EventEmitter {
         logger.info('▶️ Trading resumed');
     }
 
-    isTradingEnabledStatus() {
-        return this.isTradingEnabled;
-    }
-
-    getStats() {
-        const successRate = this.stats.priceUpdates > 0 ? 
-            ((this.stats.jupiterPrices / this.stats.priceUpdates) * 100).toFixed(1) : '0';
-
-        return {
-            ...this.stats,
-            config: {
-                mode: this.config.tradingMode,
-                initialInvestment: this.config.initialInvestment,
-                priceSource: 'Jupiter Price API',
-                swapExecution: 'Jupiter Aggregator',
-                slippageTolerance: this.config.slippageTolerance + '%',
-                priceCacheTimeout: this.priceCacheTimeout + 'ms',
-                stopLossPercentage: this.config.stopLossPercentage + '%',
-                takeProfitLevels: this.config.takeProfitLevels.map(tp => `+${tp.percentage}% (sell ${tp.sellPercentage}%)`).join(', ')
-            },
-            pricing: {
-                jupiterPricesObtained: this.stats.jupiterPrices,
-                totalPriceApiCalls: this.stats.priceApiCalls,
-                failures: this.stats.priceFailures,
-                successRate: successRate + '%',
-                method: 'Jupiter Price API (real-time aggregated)',
-                cacheTimeout: '3 seconds'
-            },
-            jupiter: {
-                priceApiCalls: this.stats.priceApiCalls,
-                quotes: this.stats.jupiterQuotes,
-                swaps: this.stats.jupiterSwaps,
-                priceApiUrl: this.JUPITER_PRICE_API,
-                swapApiUrl: this.JUPITER_API_URL
-            },
-            trading: {
-                liveTradesExecuted: this.stats.liveTradesExecuted,
-                paperTradesExecuted: this.stats.paperTradesExecuted,
-                totalPnL: this.stats.totalPnL.toFixed(4) + ' SOL',
-                buyOrders: this.stats.buyOrders,
-                sellOrders: this.stats.sellOrders
-            }
-        };
-    }
-
     async stop() {
         this.pauseTrading();
         this.priceCache.clear();
-        logger.info('🛑 Trading bot stopped');
+        
+        // Clean up HTTP agents
+        if (this.httpClient?.defaults?.httpAgent) {
+            this.httpClient.defaults.httpAgent.destroy();
+        }
+        if (this.httpClient?.defaults?.httpsAgent) {
+            this.httpClient.defaults.httpsAgent.destroy();
+        }
+        
+        logger.info('🛑 Trading bot stopped (HTTP connections closed)');
     }
 }
 
