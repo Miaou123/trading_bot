@@ -1,12 +1,11 @@
-// src/bot/tradingBot.js - SIMPLE: Auto pool discovery + debugPrice method + Jupiter fallback
+// src/bot/tradingBot.js - ULTIMATE: Pool derivation + PumpSwap direct trading
 const { Connection, PublicKey, Keypair, VersionedTransaction } = require('@solana/web3.js');
 const { AccountLayout } = require('@solana/spl-token');
+const { NATIVE_MINT } = require('@solana/spl-token');
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
-const axios = require('axios');
-const http = require('http');
-const https = require('https');
 const { bs58 } = require('@coral-xyz/anchor/dist/cjs/utils/bytes');
+const BN = require('bn.js');
 
 class TradingBot extends EventEmitter {
     constructor(config = {}) {
@@ -29,36 +28,10 @@ class TradingBot extends EventEmitter {
         this.positionManager = config.positionManager;
         this.connection = new Connection(this.config.rpcUrl, 'confirmed');
         
-        // Jupiter API configuration
-        this.JUPITER_API_URL = 'https://quote-api.jup.ag/v6';
-        this.SOL_MINT = 'So11111111111111111111111111111111111111112';
-        
-        // 🚀 OPTIMIZED: Persistent HTTP connections with keep-alive
-        this.httpClient = axios.create({
-            timeout: 5000,
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (compatible; TradingBot/1.0)',
-                'Connection': 'keep-alive',
-                'Accept': 'application/json',
-                'Accept-Encoding': 'gzip, deflate, br'
-            },
-            // HTTP Keep-Alive agents for persistent connections
-            httpAgent: new http.Agent({ 
-                keepAlive: true,
-                maxSockets: 10,           // Max concurrent connections
-                maxFreeSockets: 5,        // Keep 5 connections open
-                keepAliveMsecs: 30000,    // Keep alive for 30 seconds
-                timeout: 5000
-            }),
-            httpsAgent: new https.Agent({ 
-                keepAlive: true,
-                maxSockets: 10,
-                maxFreeSockets: 5,
-                keepAliveMsecs: 30000,
-                timeout: 5000,
-                rejectUnauthorized: true
-            })
-        });
+        // 🚀 POOL DERIVATION SETUP
+        this.PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
+        this.PUMP_AMM_PROGRAM_ID = new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA');
+        this.CANONICAL_POOL_INDEX = 0;
         
         // Initialize wallet for live trading
         this.wallet = null;
@@ -70,31 +43,38 @@ class TradingBot extends EventEmitter {
         this.priceCache = new Map();
         this.priceCacheTimeout = 3000; // 3 seconds
         
-        // Initialize PumpSwap SDK
+        // 🚀 Initialize PumpSwap SDK for direct trading
         this.pumpAmmSdk = null;
+        this.pumpInternalSdk = null;
         this.initializePumpSDK();
         
-        // Statistics
+        // Enhanced statistics
         this.stats = {
             alertsProcessed: 0,
             tradesExecuted: 0,
             buyOrders: 0,
             sellOrders: 0,
             totalPnL: 0,
+            // Pool derivation stats
+            poolsDerivied: 0,
+            derivationSuccesses: 0,
+            derivationFailures: 0,
+            // Price source stats
             manualPrices: 0,
             jupiterPrices: 0,
             priceFailures: 0,
-            poolsFound: 0,
-            poolsNotFound: 0,
-            httpRequests: 0,
-            httpKeepAliveUsed: 0,
+            // Trading method stats
+            pumpSwapTrades: 0,
+            paperTrades: 0,
+            liveTrades: 0,
+            // Migration specific
+            migrationTrades: 0,
+            instantPoolTrades: 0,
             errors: 0
         };
 
         this.isTradingEnabled = true;
         this.isInitialized = false;
-        
-        logger.info('🚀 HTTP Keep-Alive connections initialized for faster API calls');
     }
 
     initializeWallet() {
@@ -119,21 +99,27 @@ class TradingBot extends EventEmitter {
 
     async initializePumpSDK() {
         try {
-            const { PumpAmmSdk } = require('@pump-fun/pump-swap-sdk');
+            const { PumpAmmSdk, PumpAmmInternalSdk } = require('@pump-fun/pump-swap-sdk');
+            
+            // Initialize both SDKs
             this.pumpAmmSdk = new PumpAmmSdk(this.connection);
-            logger.info('✅ PumpSwap SDK initialized');
+            this.pumpInternalSdk = new PumpAmmInternalSdk(this.connection);
+            
+            logger.info('✅ PumpSwap SDK initialized (High-level + Internal)');
+            return true;
         } catch (error) {
             logger.warn('⚠️ PumpSwap SDK not available:', error.message);
             this.pumpAmmSdk = null;
+            this.pumpInternalSdk = null;
+            return false;
         }
     }
 
     async initialize() {
         try {
-            logger.info('🔧 Initializing simple trading bot...');
+            logger.info('🔧 Initializing ULTIMATE trading bot...');
             logger.info(`💰 Trading mode: ${this.config.tradingMode.toUpperCase()}`);
-            logger.info(`🎯 Price System: Auto Pool Discovery + Manual Calculation + Jupiter Fallback`);
-            logger.info(`🚀 HTTP: Keep-Alive connections for faster API calls`);
+            logger.info(`⚡ Trading System: Pool Derivation + PumpSwap Direct Trading`);
             
             const blockHeight = await this.connection.getBlockHeight();
             logger.info(`📡 Connected to Solana (block: ${blockHeight})`);
@@ -144,66 +130,57 @@ class TradingBot extends EventEmitter {
             }
 
             this.isInitialized = true;
-            logger.info('✅ Simple trading bot initialized');
+            logger.info('✅ ULTIMATE trading bot initialized');
         } catch (error) {
             logger.error('❌ Failed to initialize:', error);
             throw error;
         }
     }
 
-    // 🔍 STEP 1: Find pool address using DexScreener API with persistent connections
-    async findPoolAddress(tokenAddress) {
+    // 🚀 INSTANT pool derivation (0-5ms)
+    derivePoolAddress(tokenMint) {
         try {
-            const startTime = Date.now();
-            logger.debug(`🔍 Finding pool for token ${tokenAddress} (keep-alive)...`);
+            const mintPubkey = new PublicKey(tokenMint);
             
-            this.stats.httpRequests++;
+            // Step 1: Derive pool authority
+            const [poolAuthority] = PublicKey.findProgramAddressSync(
+                [
+                    Buffer.from("pool-authority"),
+                    mintPubkey.toBuffer()
+                ],
+                this.PUMP_PROGRAM_ID
+            );
             
-            // Use persistent HTTP client for faster requests
-            const response = await this.httpClient.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
+            // Step 2: Derive pool address
+            const poolIndexBuffer = Buffer.alloc(2);
+            poolIndexBuffer.writeUInt16LE(this.CANONICAL_POOL_INDEX, 0);
             
-            // Check if keep-alive was used (connection reused)
-            const isKeepAlive = response.request?.connection?.reusedSocket;
-            if (isKeepAlive) {
-                this.stats.httpKeepAliveUsed++;
-                logger.debug('🔗 Keep-alive connection reused');
-            }
+            const [poolAddress] = PublicKey.findProgramAddressSync(
+                [
+                    Buffer.from("pool"),
+                    poolIndexBuffer,
+                    poolAuthority.toBuffer(),
+                    mintPubkey.toBuffer(),
+                    NATIVE_MINT.toBuffer()
+                ],
+                this.PUMP_AMM_PROGRAM_ID
+            );
             
-            const duration = Date.now() - startTime;
+            this.stats.poolsDerivied++;
+            this.stats.derivationSuccesses++;
             
-            if (response.data && response.data.pairs && response.data.pairs.length > 0) {
-                // Find SOL pairs only
-                const solPairs = response.data.pairs.filter(pair => 
-                    pair.quoteToken && 
-                    (pair.quoteToken.symbol === 'SOL' || pair.quoteToken.symbol === 'WSOL')
-                );
-                
-                if (solPairs.length > 0) {
-                    // Get the most liquid pair
-                    const bestPair = solPairs.sort((a, b) => {
-                        const liquidityA = parseFloat(a.liquidity?.usd || '0');
-                        const liquidityB = parseFloat(b.liquidity?.usd || '0');
-                        return liquidityB - liquidityA;
-                    })[0];
-                    
-                    this.stats.poolsFound++;
-                    logger.debug(`✅ Pool found: ${bestPair.pairAddress} (${duration}ms, ${bestPair.dexId}, ${bestPair.liquidity?.usd || 'N/A'})`);
-                    return bestPair.pairAddress;
-                }
-            }
-            
-            this.stats.poolsNotFound++;
-            logger.debug(`❌ No SOL pool found for ${tokenAddress} (${duration}ms)`);
-            return null;
+            const poolAddressString = poolAddress.toString();
+            logger.debug(`⚡ Pool derived: ${poolAddressString}`);
+            return poolAddressString;
             
         } catch (error) {
-            this.stats.poolsNotFound++;
-            logger.debug(`❌ Pool discovery failed: ${error.message}`);
+            this.stats.derivationFailures++;
+            logger.debug(`❌ Pool derivation failed: ${error.message}`);
             return null;
         }
     }
 
-    // 🔧 STEP 2: Calculate price using debugPrice method (WORKING!)
+    // 🔧 Calculate price using manual RPC method (FAST!)
     async calculatePriceFromPool(tokenAddress, poolAddress) {
         try {
             if (!this.pumpAmmSdk) {
@@ -232,7 +209,7 @@ class TradingBot extends EventEmitter {
             const baseTokenData = AccountLayout.decode(baseAccountInfo.data);
             const quoteTokenData = AccountLayout.decode(quoteAccountInfo.data);
             
-            // Convert to readable amounts (exactly like debugPrice.js)
+            // Convert to readable amounts
             const baseAmount = parseFloat(baseTokenData.amount.toString()) / Math.pow(10, 6); // Token: 6 decimals
             const quoteAmount = parseFloat(quoteTokenData.amount.toString()) / Math.pow(10, 9); // SOL: 9 decimals
             
@@ -240,7 +217,7 @@ class TradingBot extends EventEmitter {
                 throw new Error(`Invalid pool reserves: ${baseAmount} tokens, ${quoteAmount} SOL`);
             }
 
-            // Calculate price (exactly like debugPrice.js)
+            // Calculate price
             const price = quoteAmount / baseAmount;
             
             this.stats.manualPrices++;
@@ -254,45 +231,8 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    // 🪐 STEP 3: Jupiter fallback price with persistent connections
-    async getJupiterPrice(tokenAddress) {
-        try {
-            logger.debug(`🪐 Getting Jupiter fallback price for ${tokenAddress}...`);
-            
-            const testAmount = 1000000; // 0.001 SOL
-            
-            this.stats.httpRequests++;
-            
-            // Use persistent HTTP client for Jupiter API too
-            const quote = await this.httpClient.get(`${this.JUPITER_API_URL}/quote`, {
-                params: {
-                    inputMint: this.SOL_MINT,
-                    outputMint: tokenAddress,
-                    amount: testAmount,
-                    slippageBps: 50
-                }
-            });
-
-            if (!quote.data || !quote.data.outAmount) {
-                throw new Error('No Jupiter quote received');
-            }
-
-            const tokensReceived = parseFloat(quote.data.outAmount) / Math.pow(10, 6); // Assume 6 decimals
-            const price = (testAmount / 1e9) / tokensReceived;
-
-            this.stats.jupiterPrices++;
-            logger.debug(`✅ Jupiter price: ${price.toFixed(12)} SOL`);
-            
-            return price;
-
-        } catch (error) {
-            logger.debug(`❌ Jupiter price failed: ${error.message}`);
-            return null;
-        }
-    }
-
-    // 🧠 MAIN: Smart price fetching with auto pool discovery
-    async getTokenPrice(tokenAddress, forceRefresh = false) {
+    // 🧠 MAIN: Optimized price fetching with instant pool derivation
+    async getTokenPrice(tokenAddress, forceRefresh = false, migrationPool = null) {
         try {
             const now = Date.now();
             
@@ -307,39 +247,48 @@ class TradingBot extends EventEmitter {
             logger.debug(`💰 Getting price for ${tokenAddress}...`);
             let price = null;
             let source = 'unknown';
+            let poolAddress = null;
 
-            // METHOD 1: Auto discover pool + manual calculation (FAST!)
-            const poolAddress = await this.findPoolAddress(tokenAddress);
-            if (poolAddress) {
-                price = await this.calculatePriceFromPool(tokenAddress, poolAddress);
+            // 🚀 PRIORITY 1: Use provided migration pool (INSTANT!)
+            if (migrationPool) {
+                logger.debug(`⚡ Using migration pool: ${migrationPool}`);
+                price = await this.calculatePriceFromPool(tokenAddress, migrationPool);
+                poolAddress = migrationPool;
                 if (price) {
-                    source = 'manual';
+                    source = 'migration_pool';
+                    this.stats.instantPoolTrades++;
                 }
             }
 
-            // METHOD 2: Jupiter fallback (SLOWER but reliable)
+            // 🚀 PRIORITY 2: Derive pool instantly (0-5ms)
             if (!price) {
-                logger.debug(`🔄 Manual method failed, trying Jupiter fallback...`);
-                price = await this.getJupiterPrice(tokenAddress);
-                if (price) {
-                    source = 'jupiter';
+                const derivedPool = this.derivePoolAddress(tokenAddress);
+                if (derivedPool) {
+                    price = await this.calculatePriceFromPool(tokenAddress, derivedPool);
+                    poolAddress = derivedPool;
+                    if (price) {
+                        source = 'derived_pool';
+                    }
                 }
             }
 
             if (!price) {
                 this.stats.priceFailures++;
-                throw new Error('All price methods failed');
+                throw new Error('Pool derivation and manual calculation failed');
             }
 
-            // Cache the result
+            // Cache the result with pool address
             this.priceCache.set(tokenAddress, {
                 price: price,
                 timestamp: now,
-                source: source
+                source: source,
+                poolAddress: poolAddress
             });
 
-            logger.debug(`✅ Final price: ${price.toFixed(12)} SOL via ${source}`);
-            return price;
+            const sourceEmoji = source === 'migration_pool' ? '⚡' : '🔍';
+            logger.debug(`${sourceEmoji} Final price: ${price.toFixed(12)} SOL via ${source}`);
+            
+            return { price, poolAddress, source };
 
         } catch (error) {
             this.stats.priceFailures++;
@@ -349,34 +298,69 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    // Helper method for position manager
-    async getTokenPriceManual(tokenAddress, poolAddress = null) {
+    // 🚀 NEW: Execute REAL PumpSwap buy
+    async executePumpSwapBuy(alert, investmentAmount, poolAddress) {
         try {
-            return await this.getTokenPrice(tokenAddress, true);
+            if (!this.pumpInternalSdk || !this.wallet) {
+                throw new Error('PumpSwap SDK or wallet not available for live trading');
+            }
+
+            logger.info(`🚀 Executing REAL PumpSwap buy: ${investmentAmount} SOL`);
+
+            const pool = new PublicKey(poolAddress);
+            const quoteAmount = new BN(investmentAmount * 1e9); // Convert SOL to lamports
+            const slippage = this.config.slippageTolerance;
+
+            // Get expected tokens
+            const buyResult = await this.pumpInternalSdk.buyQuoteInputInternal(pool, quoteAmount, slippage);
+            const expectedTokens = parseFloat(buyResult.base.toString()) / Math.pow(10, 6);
+
+            logger.info(`💎 Expected: ${expectedTokens.toFixed(6)} ${alert.token.symbol} for ${investmentAmount} SOL`);
+
+            // Get transaction instructions
+            const instructions = await this.pumpInternalSdk.buyQuoteInput(
+                pool,
+                quoteAmount,
+                slippage,
+                this.wallet.publicKey
+            );
+
+            // Execute transaction
+            const { sendAndConfirmTransaction } = require('@pump-fun/pump-swap-sdk');
+            const [transaction, error] = await sendAndConfirmTransaction(
+                this.connection,
+                this.wallet.publicKey,
+                instructions,
+                [this.wallet]
+            );
+
+            if (error) {
+                throw new Error(`PumpSwap transaction failed: ${JSON.stringify(error)}`);
+            }
+
+            const signature = Buffer.from(transaction.signatures[0]).toString('base64');
+            this.stats.pumpSwapTrades++;
+            this.stats.liveTrades++;
+
+            logger.info(`✅ PumpSwap BUY SUCCESS! Signature: ${signature}`);
+
+            return {
+                success: true,
+                signature: signature,
+                expectedTokens: expectedTokens,
+                actualPrice: investmentAmount / expectedTokens,
+                poolAddress: poolAddress,
+                method: 'pumpswap'
+            };
+
         } catch (error) {
-            logger.debug(`Position manager price fetch failed: ${error.message}`);
-            return null;
+            logger.error(`❌ PumpSwap buy failed: ${error.message}`);
+            throw error;
         }
     }
 
-    // Calculate stop loss price
-    calculateStopLossPrice(entryPrice) {
-        return entryPrice * (1 - this.config.stopLossPercentage / 100);
-    }
-
-    // Calculate take profit prices
-    calculateTakeProfitPrices(entryPrice) {
-        return this.config.takeProfitLevels.map((level, index) => ({
-            targetPrice: entryPrice * (1 + level.percentage / 100),
-            sellPercentage: level.sellPercentage,
-            percentage: level.percentage,
-            triggered: false,
-            level: index + 1
-        }));
-    }
-
-    // Execute paper buy
-    async executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens) {
+    // 📝 Execute paper buy (for paper trading mode)
+    async executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens, metadata = {}) {
         const stopLossPrice = this.calculateStopLossPrice(currentPrice);
         const takeProfitPrices = this.calculateTakeProfitPrices(currentPrice);
 
@@ -395,7 +379,12 @@ class TradingBot extends EventEmitter {
             remainingQuantity: expectedTokens.toString(),
             alert: alert,
             paperTrade: true,
-            priceSource: this.priceCache.get(alert.token.address)?.source || 'unknown'
+            // Enhanced metadata
+            priceSource: metadata.priceSource || 'unknown',
+            migrationPool: metadata.migrationPool || null,
+            poolAddress: metadata.poolAddress || null,
+            eventType: alert.eventType || 'creation',
+            isMigration: alert.eventType === 'migration'
         };
 
         if (this.positionManager) {
@@ -404,43 +393,183 @@ class TradingBot extends EventEmitter {
 
         this.stats.tradesExecuted++;
         this.stats.buyOrders++;
+        this.stats.paperTrades++;
 
-        const priceSource = position.priceSource === 'manual' ? 'Manual RPC' : 'Jupiter API';
-        logger.info(`📝 Paper buy: ${expectedTokens.toFixed(2)} ${alert.token.symbol} @ ${currentPrice.toFixed(12)} SOL (${priceSource})`);
+        // Enhanced logging
+        const sourceInfo = metadata.priceSource === 'migration_pool' ? '⚡ Migration Pool' : 
+                          metadata.priceSource === 'derived_pool' ? '🔍 Derived Pool' : 'Unknown';
+        
+        const migrationInfo = position.isMigration ? 
+            (metadata.migrationPool ? ` [INSTANT MIGRATION]` : ' [MIGRATION]') : '';
+        
+        logger.info(`📝 Paper buy: ${expectedTokens.toFixed(2)} ${alert.token.symbol} @ ${currentPrice.toFixed(12)} SOL (${sourceInfo})${migrationInfo}`);
         
         this.emit('tradeExecuted', {
             type: 'PAPER_BUY',
             symbol: alert.token.symbol,
             amount: expectedTokens.toString(),
             price: currentPrice,
-            priceSource: priceSource
+            priceSource: sourceInfo,
+            isMigration: position.isMigration,
+            migrationPool: metadata.migrationPool
         });
 
         return position;
     }
 
-    // Main buy execution
+    // 🚀 NEW: Execute live buy with real PumpSwap
+    async executeLiveBuy(alert, investmentAmount, poolAddress, priceInfo) {
+        try {
+            const buyResult = await this.executePumpSwapBuy(alert, investmentAmount, poolAddress);
+            
+            if (!buyResult.success) {
+                throw new Error('PumpSwap buy failed');
+            }
+
+            // Create position for live trade
+            const stopLossPrice = this.calculateStopLossPrice(buyResult.actualPrice);
+            const takeProfitPrices = this.calculateTakeProfitPrices(buyResult.actualPrice);
+
+            const position = {
+                id: this.generatePositionId(),
+                tokenAddress: alert.token.address,
+                symbol: alert.token.symbol,
+                side: 'LONG',
+                entryPrice: buyResult.actualPrice,
+                quantity: buyResult.expectedTokens.toString(),
+                investedAmount: investmentAmount,
+                entryTime: Date.now(),
+                txHash: buyResult.signature,
+                stopLossPrice: stopLossPrice,
+                takeProfitLevels: takeProfitPrices,
+                remainingQuantity: buyResult.expectedTokens.toString(),
+                alert: alert,
+                paperTrade: false,
+                // Live trade metadata
+                priceSource: priceInfo.source,
+                migrationPool: priceInfo.source === 'migration_pool' ? poolAddress : null,
+                poolAddress: poolAddress,
+                eventType: alert.eventType || 'creation',
+                isMigration: alert.eventType === 'migration',
+                tradingMethod: 'pumpswap'
+            };
+
+            if (this.positionManager) {
+                await this.positionManager.addPosition(position);
+            }
+
+            const migrationInfo = position.isMigration ? ' [LIVE MIGRATION]' : '';
+            logger.info(`🚀 Live buy: ${buyResult.expectedTokens.toFixed(6)} ${alert.token.symbol} @ ${buyResult.actualPrice.toFixed(12)} SOL${migrationInfo}`);
+
+            this.emit('tradeExecuted', {
+                type: 'LIVE_BUY',
+                symbol: alert.token.symbol,
+                amount: buyResult.expectedTokens.toString(),
+                price: buyResult.actualPrice,
+                signature: buyResult.signature,
+                priceSource: priceInfo.source,
+                isMigration: position.isMigration,
+                method: 'pumpswap'
+            });
+
+            return position;
+
+        } catch (error) {
+            logger.error(`❌ Live buy execution failed: ${error.message}`);
+            throw error;
+        }
+    }
+
+    // Enhanced buy execution with PumpSwap integration
     async executeBuy(alert) {
         try {
             const tokenAddress = alert.token.address;
             const symbol = alert.token.symbol;
             const investmentAmount = this.config.initialInvestment;
             
-            logger.info(`💰 Executing BUY: ${investmentAmount} SOL → ${symbol}`);
+            // Check if this is a migration with pool data
+            const isMigration = alert.eventType === 'migration';
+            const migrationPool = alert.migration?.pool;
+            const hasMigrationPool = migrationPool && migrationPool !== 'unknown';
+            
+            logger.info(`💰 Executing BUY: ${investmentAmount} SOL → ${symbol} ${isMigration ? '(MIGRATION)' : '(CREATION)'}`);
+            
+            if (isMigration) {
+                this.stats.migrationTrades++;
+                if (hasMigrationPool) {
+                    logger.info(`⚡ INSTANT MIGRATION: Using provided pool ${migrationPool}`);
+                } else {
+                    logger.info(`🔍 Migration without pool, deriving instantly...`);
+                }
+            }
 
-            // Get current price using smart method
-            const currentPrice = await this.getTokenPrice(tokenAddress, true);
+            // Get current price and pool address
+            const priceInfo = await this.getTokenPrice(
+                tokenAddress, 
+                true, // Force refresh for new trades
+                hasMigrationPool ? migrationPool : null
+            );
+            
+            const currentPrice = priceInfo.price;
+            const poolAddress = priceInfo.poolAddress;
+            const priceSource = priceInfo.source;
             const expectedTokens = investmentAmount / currentPrice;
             
-            logger.info(`💎 Trade: ${expectedTokens.toFixed(2)} ${symbol} @ ${currentPrice.toFixed(12)} SOL`);
+            const sourceEmoji = priceSource === 'migration_pool' ? '⚡' : '🔍';
+            logger.info(`💎 Trade: ${expectedTokens.toFixed(2)} ${symbol} @ ${currentPrice.toFixed(12)} SOL ${sourceEmoji}`);
 
-            // For now, only paper trading (live trading would use Jupiter swap here)
-            return await this.executePaperBuy(alert, investmentAmount, currentPrice, expectedTokens);
+            // Execute based on trading mode
+            if (this.config.tradingMode === 'live') {
+                // 🚀 LIVE TRADING with PumpSwap
+                return await this.executeLiveBuy(alert, investmentAmount, poolAddress, priceInfo);
+            } else {
+                // 📝 PAPER TRADING
+                return await this.executePaperBuy(
+                    alert, 
+                    investmentAmount, 
+                    currentPrice, 
+                    expectedTokens,
+                    { 
+                        priceSource: priceSource,
+                        migrationPool: hasMigrationPool ? migrationPool : null,
+                        poolAddress: poolAddress
+                    }
+                );
+            }
 
         } catch (error) {
             logger.error(`❌ Buy execution failed: ${error.message}`);
             this.stats.errors++;
             throw error;
+        }
+    }
+
+    // Calculate stop loss and take profit prices
+    calculateStopLossPrice(entryPrice) {
+        return entryPrice * (1 - this.config.stopLossPercentage / 100);
+    }
+
+    calculateTakeProfitPrices(entryPrice) {
+        return this.config.takeProfitLevels.map((level, index) => ({
+            targetPrice: entryPrice * (1 + level.percentage / 100),
+            sellPercentage: level.sellPercentage,
+            percentage: level.percentage,
+            triggered: false,
+            level: index + 1
+        }));
+    }
+
+    // Helper method for position manager
+    async getTokenPriceManual(tokenAddress, poolAddress = null) {
+        try {
+            if (poolAddress) {
+                return await this.calculatePriceFromPool(tokenAddress, poolAddress);
+            }
+            const priceInfo = await this.getTokenPrice(tokenAddress, true);
+            return priceInfo.price;
+        } catch (error) {
+            logger.debug(`Position manager price fetch failed: ${error.message}`);
+            return null;
         }
     }
 
@@ -453,7 +582,12 @@ class TradingBot extends EventEmitter {
 
         try {
             this.stats.alertsProcessed++;
-            logger.info(`🔔 Processing alert: ${alert.token.symbol}`);
+            
+            const isMigration = alert.eventType === 'migration';
+            const migrationInfo = isMigration ? 
+                (alert.migration?.pool ? ' [INSTANT MIGRATION]' : ' [MIGRATION]') : '';
+            
+            logger.info(`🔔 Processing alert: ${alert.token.symbol}${migrationInfo}`);
 
             if (this.positionManager?.hasPosition(alert.token.address)) {
                 logger.info(`⏭️ Already have position in ${alert.token.symbol}`);
@@ -468,27 +602,30 @@ class TradingBot extends EventEmitter {
     }
 
     getStats() {
-        const keepAliveEfficiency = this.stats.httpRequests > 0 ? 
-            ((this.stats.httpKeepAliveUsed / this.stats.httpRequests) * 100).toFixed(1) : '0';
+        const derivationSuccessRate = this.stats.poolsDerivied > 0 ? 
+            ((this.stats.derivationSuccesses / this.stats.poolsDerivied) * 100).toFixed(1) : '0';
 
         return {
             ...this.stats,
             config: {
                 mode: this.config.tradingMode,
-                priceMethod: 'Auto Pool Discovery + Manual Calculation + Jupiter Fallback',
-                httpOptimization: 'Keep-Alive Persistent Connections'
+                tradingMethod: 'Pool Derivation + PumpSwap Direct Trading'
             },
-            pricing: {
-                manualPrices: this.stats.manualPrices,
-                jupiterPrices: this.stats.jupiterPrices,
-                failures: this.stats.priceFailures,
-                poolsFound: this.stats.poolsFound,
-                poolsNotFound: this.stats.poolsNotFound
+            poolDerivation: {
+                derived: this.stats.poolsDerivied,
+                successes: this.stats.derivationSuccesses,
+                failures: this.stats.derivationFailures,
+                successRate: derivationSuccessRate + '%'
             },
-            http: {
-                totalRequests: this.stats.httpRequests,
-                keepAliveUsed: this.stats.httpKeepAliveUsed,
-                keepAliveEfficiency: keepAliveEfficiency + '%'
+            trading: {
+                paperTrades: this.stats.paperTrades,
+                liveTrades: this.stats.liveTrades,
+                pumpSwapTrades: this.stats.pumpSwapTrades,
+                manualPrices: this.stats.manualPrices
+            },
+            migration: {
+                totalMigrations: this.stats.migrationTrades,
+                instantPoolTrades: this.stats.instantPoolTrades
             }
         };
     }
@@ -506,16 +643,7 @@ class TradingBot extends EventEmitter {
     async stop() {
         this.pauseTrading();
         this.priceCache.clear();
-        
-        // Clean up HTTP agents
-        if (this.httpClient?.defaults?.httpAgent) {
-            this.httpClient.defaults.httpAgent.destroy();
-        }
-        if (this.httpClient?.defaults?.httpsAgent) {
-            this.httpClient.defaults.httpsAgent.destroy();
-        }
-        
-        logger.info('🛑 Trading bot stopped (HTTP connections closed)');
+        logger.info('🛑 ULTIMATE trading bot stopped');
     }
 }
 

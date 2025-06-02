@@ -1,2 +1,100 @@
 {
+  "active": {
+    "pos_1748863234442_fqdor6bi6": {
+      "id": "pos_1748863234442_fqdor6bi6",
+      "tokenAddress": "HQC1xWpfKArsr6g8vBPn6MrgiePPPMPZ7uaHaAxYpump",
+      "symbol": "LIVE",
+      "side": "LONG",
+      "entryPrice": 6.616761613855464e-7,
+      "quantity": "15113.133257",
+      "investedAmount": 0.01,
+      "entryTime": 1748863234442,
+      "txHash": "aQrm6x6n7bjJctg4WTPg/RB6FunBOcyW4P7hj61PeZ8B3GnG6l2UKix8M2ecs0LBuMjULBX2VuDr63p1y3hsCQ==",
+      "stopLossPrice": 3.308380806927732e-7,
+      "takeProfitLevels": [
+        {
+          "targetPrice": 0.0000013233523227710928,
+          "sellPercentage": 50,
+          "percentage": 100,
+          "triggered": false,
+          "level": 1
+        },
+        {
+          "targetPrice": 0.0000026467046455421856,
+          "sellPercentage": 25,
+          "percentage": 300,
+          "triggered": false,
+          "level": 2
+        },
+        {
+          "targetPrice": 0.000006616761613855464,
+          "sellPercentage": 100,
+          "percentage": 900,
+          "triggered": false,
+          "level": 3
+        }
+      ],
+      "remainingQuantity": "15113.133257",
+      "alert": {
+        "token": {
+          "address": "HQC1xWpfKArsr6g8vBPn6MrgiePPPMPZ7uaHaAxYpump",
+          "symbol": "LIVE",
+          "name": "Live Test Token"
+        },
+        "twitter": {
+          "likes": 1000,
+          "views": 100000,
+          "url": "https://twitter.com/live/test"
+        },
+        "confidence": "HIGH",
+        "eventType": "creation"
+      },
+      "paperTrade": false,
+      "priceSource": "derived_pool",
+      "migrationPool": null,
+      "poolAddress": "A4Aj31bhHzLoTh2WVprPMWmgcwgPMjgqsSARsPvyFp28",
+      "eventType": "creation",
+      "isMigration": false,
+      "tradingMethod": "pumpswap",
+      "createdAt": 1748863234442,
+      "status": "ACTIVE",
+      "totalPnL": 0,
+      "currentPrice": 6.616761613855464e-7,
+      "currentValue": 0.01,
+      "unrealizedPnL": 0,
+      "priceChange": 0,
+      "lastPriceUpdate": 1748863234442,
+      "lastPriceSource": "derived_pool",
+      "priceHistory": [
+        {
+          "timestamp": 1748863234442,
+          "price": 6.616761613855464e-7,
+          "source": "entry"
+        }
+      ]
+    }
+  },
+  "closed": {},
+  "lastSaved": "2025-06-02T11:24:36.945Z",
+  "stats": {
+    "stopLossTriggered": 0,
+    "takeProfitTriggered": 0,
+    "priceUpdates": 0,
+    "manualPriceUpdates": 0,
+    "jupiterPriceUpdates": 0,
+    "priceUpdateFailures": 0
+  },
+  "priceUpdateStats": {
+    "manual": {
+      "attempts": 6,
+      "successes": 0,
+      "totalTime": 0
+    },
+    "jupiter": {
+      "attempts": 1,
+      "successes": 0,
+      "totalTime": 0
+    },
+    "lastUpdate": 1748863231742
+  }
 }
