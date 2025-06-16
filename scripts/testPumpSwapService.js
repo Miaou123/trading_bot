@@ -1,473 +1,284 @@
-// scripts/testPumpSwapService.js - Standalone PumpSwap service tester
+// scripts/testPumpSwapService.js - Simple REAL buy/sell test
 require('dotenv').config();
-const { Connection, PublicKey, Keypair, VersionedTransaction, TransactionMessage } = require('@solana/web3.js');
-const { bs58 } = require('@coral-xyz/anchor/dist/cjs/utils/bytes');
-const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
-const BN = require('bn.js');
-const fs = require('fs');
-const path = require('path');
-
-// Import your PumpSwap service
 const PumpSwapService = require('../src/services/pumpSwapService');
+const logger = require('../src/utils/logger');
 
-class PumpSwapTester {
+class SimplePumpSwapTester {
     constructor() {
-        // Initialize connection
-        this.connection = new Connection(
-            process.env.HELIUS_RPC_URL || process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-            'confirmed'
-        );
-        
-        // Initialize wallet
-        this.wallet = this.initializeWallet();
-        
-        // Load PumpSwap IDL and initialize service
-        this.pumpSwapService = null;
-        this.initializeService();
-        
-        // Test configuration
-        this.config = {
-            buyAmount: 0.001, // Default 0.001 SOL buy
-            sellPercentage: 100, // Sell 100% of tokens
-            slippage: 5 // 5% slippage tolerance
-        };
+        this.service = new PumpSwapService({
+            privateKey: process.env.PRIVATE_KEY,
+            slippageTolerance: 5
+        });
     }
 
-    initializeWallet() {
+    async testBuy(tokenAddress, solAmount) {
         try {
-            if (!process.env.PRIVATE_KEY) {
-                throw new Error('PRIVATE_KEY not found in .env file');
-            }
+            console.log(`\n🚀 TESTING REAL BUY`);
+            console.log(`Token: ${tokenAddress}`);
+            console.log(`Amount: ${solAmount} SOL`);
+            console.log('='.repeat(50));
+
+            const result = await this.service.executeBuy(tokenAddress, solAmount);
             
-            const privateKeyString = process.env.PRIVATE_KEY.trim();
-            let secretKey;
-            
-            if (privateKeyString.startsWith('[')) {
-                secretKey = new Uint8Array(JSON.parse(privateKeyString));
+            if (result.success) {
+                console.log(`✅ BUY SUCCESS!`);
+                console.log(`   Signature: ${result.signature}`);
+                console.log(`   SOL Spent: ${result.solSpent} SOL`);
+                console.log(`   Explorer: https://solscan.io/tx/${result.signature}`);
+                return result;
             } else {
-                secretKey = bs58.decode(privateKeyString);
+                console.log(`❌ BUY FAILED: ${result.error}`);
+                return null;
             }
-            
-            const wallet = Keypair.fromSecretKey(secretKey);
-            console.log(`💼 Wallet: ${wallet.publicKey.toString()}`);
-            return wallet;
         } catch (error) {
-            console.error('❌ Wallet initialization failed:', error.message);
-            throw error;
+            console.log(`❌ BUY ERROR: ${error.message}`);
+            return null;
         }
     }
 
-    initializeService() {
+    async testSell(tokenAddress, tokenAmount) {
         try {
-            // Try to load PumpSwap IDL from multiple possible locations
-            const possiblePaths = [
-                path.join(__dirname, '../pumpswap-idl.json'),
-                path.join(__dirname, '../../pumpswap-idl.json'),
-                path.join(process.cwd(), 'pumpswap-idl.json')
-            ];
+            console.log(`\n🚀 TESTING REAL SELL`);
+            console.log(`Token: ${tokenAddress}`);
+            console.log(`Amount: ${tokenAmount} tokens`);
+            console.log('='.repeat(50));
 
-            let pumpSwapIDL = null;
-            for (const idlPath of possiblePaths) {
-                if (fs.existsSync(idlPath)) {
-                    console.log(`📄 Loading PumpSwap IDL from: ${idlPath}`);
-                    pumpSwapIDL = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
-                    break;
-                }
-            }
-
-            if (!pumpSwapIDL) {
-                throw new Error('PumpSwap IDL file not found. Please ensure pumpswap-idl.json exists in the project root.');
-            }
-
-            // Initialize PumpSwap service
-            this.pumpSwapService = new PumpSwapService(this.connection, this.wallet, pumpSwapIDL);
-            console.log('✅ PumpSwap service initialized');
+            const result = await this.service.executeSell(tokenAddress, tokenAmount);
             
+            if (result.success) {
+                console.log(`✅ SELL SUCCESS!`);
+                console.log(`   Signature: ${result.signature}`);
+                console.log(`   SOL Received: ${result.solReceived} SOL`);
+                console.log(`   Tokens Spent: ${result.tokensSpent} tokens`);
+                console.log(`   Explorer: https://solscan.io/tx/${result.signature}`);
+                return result;
+            } else {
+                console.log(`❌ SELL FAILED: ${result.error}`);
+                return null;
+            }
         } catch (error) {
-            console.error('❌ PumpSwap service initialization failed:', error.message);
-            throw error;
+            console.log(`❌ SELL ERROR: ${error.message}`);
+            return null;
         }
     }
 
-    async getWalletBalance() {
+    async getTokenBalance(tokenAddress) {
         try {
-            const balance = await this.connection.getBalance(this.wallet.publicKey);
-            return balance / 1e9; // Convert to SOL
+            const balance = await this.service.getTokenBalance(tokenAddress);
+            console.log(`💰 Current token balance: ${balance.toFixed(6)} tokens`);
+            return balance;
         } catch (error) {
-            console.error('Error getting wallet balance:', error);
+            console.log(`❌ Balance check failed: ${error.message}`);
             return 0;
         }
     }
 
-    async getTokenBalance(tokenMint) {
+    async testBuyThenSell(tokenAddress, solAmount, sellPercentage = 100) {
         try {
-            const tokenAccount = getAssociatedTokenAddressSync(tokenMint, this.wallet.publicKey);
-            const balance = await this.connection.getTokenAccountBalance(tokenAccount);
-            return {
-                balance: parseFloat(balance.value.amount),
-                decimals: balance.value.decimals,
-                formatted: parseFloat(balance.value.amount) / Math.pow(10, balance.value.decimals)
-            };
+            console.log(`\n🧪 FULL TEST: BUY → SELL`);
+            console.log(`Token: ${tokenAddress}`);
+            console.log(`Buy: ${solAmount} SOL`);
+            console.log(`Sell: ${sellPercentage}% of tokens received`);
+            console.log('='.repeat(60));
+
+            // Step 1: Buy
+            const buyResult = await this.testBuy(tokenAddress, solAmount);
+            if (!buyResult) {
+                console.log(`❌ Test failed at buy step`);
+                return false;
+            }
+
+            // Step 2: Wait a moment
+            console.log(`\n⏳ Waiting 5 seconds for transaction to settle...`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+
+            // Step 3: Check balance
+            const balance = await this.getTokenBalance(tokenAddress);
+            if (balance <= 0) {
+                console.log(`❌ No tokens found in wallet to sell`);
+                return false;
+            }
+
+            // Step 4: Sell
+            const sellAmount = balance * (sellPercentage / 100);
+            if (sellAmount <= 0) {
+                console.log(`❌ No tokens to sell`);
+                return false;
+            }
+
+            const sellResult = await this.testSell(tokenAddress, sellAmount);
+            if (!sellResult) {
+                console.log(`❌ Test failed at sell step`);
+                return false;
+            }
+
+            // Step 5: Calculate results
+            const netSOL = sellResult.solReceived - buyResult.solSpent;
+            const percentChange = ((sellResult.solReceived - buyResult.solSpent) / buyResult.solSpent) * 100;
+
+            console.log(`\n📊 FINAL RESULTS:`);
+            console.log(`=`.repeat(30));
+            console.log(`   SOL Spent: ${buyResult.solSpent} SOL`);
+            console.log(`   SOL Received: ${sellResult.solReceived} SOL`);
+            console.log(`   Net P&L: ${netSOL > 0 ? '+' : ''}${netSOL.toFixed(6)} SOL`);
+            console.log(`   Percentage: ${percentChange > 0 ? '+' : ''}${percentChange.toFixed(2)}%`);
+            console.log(`   Buy TX: https://solscan.io/tx/${buyResult.signature}`);
+            console.log(`   Sell TX: https://solscan.io/tx/${sellResult.signature}`);
+
+            console.log(`\n🎉 FULL TEST COMPLETED SUCCESSFULLY!`);
+            return true;
+
         } catch (error) {
-            // Token account doesn't exist
-            return { balance: 0, decimals: 6, formatted: 0 };
+            console.log(`❌ Full test failed: ${error.message}`);
+            return false;
         }
     }
 
     async showMarketInfo(tokenAddress) {
         try {
-            console.log('\n📊 MARKET INFORMATION');
+            console.log(`\n📊 MARKET INFO FOR: ${tokenAddress}`);
             console.log('='.repeat(50));
-            
-            const tokenMint = new PublicKey(tokenAddress);
-            const marketData = await this.pumpSwapService.getMarketData(tokenMint);
-            
-            if (!marketData) {
-                console.log('❌ No market data found - token may not have a PumpSwap pool');
-                return false;
-            }
 
-            console.log(`🎯 Token: ${tokenAddress}`);
-            console.log(`💰 Current Price: ${marketData.price.toFixed(12)} SOL`);
-            console.log(`🏊 Pool Address: ${marketData.poolAddress}`);
-            console.log(`💧 Liquidity:`);
-            console.log(`   • Token Reserve: ${marketData.liquidity.tokenReserveFormatted.toFixed(2)} tokens`);
-            console.log(`   • SOL Reserve: ${marketData.liquidity.solReserveFormatted.toFixed(6)} SOL`);
-            console.log(`🔢 Token Decimals: ${marketData.decimals}`);
-
-            return true;
-        } catch (error) {
-            console.error('❌ Error getting market info:', error.message);
-            return false;
-        }
-    }
-
-    async testBuy(tokenAddress, solAmount) {
-        try {
-            console.log('\n🛒 TESTING BUY OPERATION');
-            console.log('='.repeat(40));
-            console.log(`💰 Buying ${solAmount} SOL worth of tokens...`);
-            
-            const tokenMint = new PublicKey(tokenAddress);
-            
-            // Get current price and calculate expected tokens
-            const priceInfo = await this.pumpSwapService.getTokenPrice(tokenMint);
-            if (!priceInfo) {
-                throw new Error('Could not get token price');
-            }
-            
-            const expectedTokens = (solAmount / priceInfo.price) * Math.pow(10, 6); // Assume 6 decimals for now
-            console.log(`📊 Expected tokens: ${(expectedTokens / 1e6).toFixed(6)}`);
-            console.log(`💎 Price per token: ${priceInfo.price.toFixed(12)} SOL`);
-            
-            // Build buy instructions
-            const buyData = await this.pumpSwapService.buildBuyInstructions(
-                tokenMint,
-                Math.floor(expectedTokens),
-                Math.floor(solAmount * 1e9), // Convert SOL to lamports
-                this.config.slippage
-            );
-            
-            console.log(`⚡ Transaction built successfully`);
-            console.log(`🔥 Max SOL to spend: ${parseFloat(buyData.maxSolIn.toString()) / 1e9} SOL`);
-            console.log(`📉 Slippage impact: ${buyData.slippageImpact.toString()} basis points`);
-            
-            // Create and send transaction
-            const { blockhash } = await this.connection.getLatestBlockhash();
-            const message = new TransactionMessage({
-                payerKey: this.wallet.publicKey,
-                recentBlockhash: blockhash,
-                instructions: buyData.instructions,
-            }).compileToV0Message();
-
-            const transaction = new VersionedTransaction(message);
-            transaction.sign([this.wallet]);
-            
-            console.log(`🚀 Sending buy transaction...`);
-            
-            const signature = await this.connection.sendTransaction(transaction, {
-                maxRetries: 3,
-                preflightCommitment: 'confirmed'
-            });
-            
-            console.log(`📝 Transaction sent: ${signature}`);
-            console.log(`🔗 Explorer: https://solscan.io/tx/${signature}`);
-            
-            // Wait for confirmation
-            console.log(`⏳ Waiting for confirmation...`);
-            const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
-            
-            if (confirmation.value.err) {
-                throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-            }
-            
-            console.log(`✅ BUY SUCCESSFUL!`);
-            console.log(`   📝 Signature: ${signature}`);
-            console.log(`   💰 SOL spent: ~${solAmount} SOL`);
-            console.log(`   📊 Expected tokens: ${(expectedTokens / 1e6).toFixed(6)}`);
-            
-            return {
-                success: true,
-                signature: signature,
-                expectedTokens: expectedTokens,
-                poolAddress: buyData.poolAddress
-            };
-            
-        } catch (error) {
-            console.error('❌ Buy test failed:', error.message);
-            return { success: false, error: error.message };
-        }
-    }
-
-    async testSell(tokenAddress, sellPercentage) {
-        try {
-            console.log('\n💸 TESTING SELL OPERATION');
-            console.log('='.repeat(40));
-            
-            const tokenMint = new PublicKey(tokenAddress);
-            
-            // Get current token balance
-            const tokenBalance = await this.getTokenBalance(tokenMint);
-            if (tokenBalance.balance === 0) {
-                throw new Error('No tokens to sell! Please buy some tokens first.');
-            }
-            
-            const tokensToSell = (tokenBalance.balance * sellPercentage / 100);
-            console.log(`📊 Current token balance: ${tokenBalance.formatted.toFixed(6)} tokens`);
-            console.log(`💸 Selling ${sellPercentage}%: ${(tokensToSell / Math.pow(10, tokenBalance.decimals)).toFixed(6)} tokens`);
-            
-            // Get current price
-            const priceInfo = await this.pumpSwapService.getTokenPrice(tokenMint);
-            if (!priceInfo) {
-                throw new Error('Could not get token price');
-            }
-            
-            const expectedSOL = (tokensToSell / Math.pow(10, tokenBalance.decimals)) * priceInfo.price;
-            console.log(`💰 Expected SOL: ${expectedSOL.toFixed(6)} SOL`);
-            console.log(`💎 Price per token: ${priceInfo.price.toFixed(12)} SOL`);
-            
-            // Build sell instructions
-            const sellData = await this.pumpSwapService.buildSellInstructions(
-                tokenMint,
-                Math.floor(tokensToSell),
-                null, // Let service calculate min SOL out
-                this.config.slippage
-            );
-            
-            console.log(`⚡ Transaction built successfully`);
-            console.log(`💰 Min SOL to receive: ${parseFloat(sellData.minSolOut.toString()) / 1e9} SOL`);
-            console.log(`📈 Slippage impact: ${sellData.slippageImpact.toString()} basis points`);
-            
-            // Create and send transaction
-            const { blockhash } = await this.connection.getLatestBlockhash();
-            const message = new TransactionMessage({
-                payerKey: this.wallet.publicKey,
-                recentBlockhash: blockhash,
-                instructions: sellData.instructions,
-            }).compileToV0Message();
-
-            const transaction = new VersionedTransaction(message);
-            transaction.sign([this.wallet]);
-            
-            console.log(`🚀 Sending sell transaction...`);
-            
-            const signature = await this.connection.sendTransaction(transaction, {
-                maxRetries: 3,
-                preflightCommitment: 'confirmed'
-            });
-            
-            console.log(`📝 Transaction sent: ${signature}`);
-            console.log(`🔗 Explorer: https://solscan.io/tx/${signature}`);
-            
-            // Wait for confirmation
-            console.log(`⏳ Waiting for confirmation...`);
-            const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
-            
-            if (confirmation.value.err) {
-                throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-            }
-            
-            const actualSOLReceived = parseFloat(sellData.expectedSolReceived.toString()) / 1e9;
-            
-            console.log(`✅ SELL SUCCESSFUL!`);
-            console.log(`   📝 Signature: ${signature}`);
-            console.log(`   💸 Tokens sold: ${(tokensToSell / Math.pow(10, tokenBalance.decimals)).toFixed(6)}`);
-            console.log(`   💰 SOL received: ~${actualSOLReceived.toFixed(6)} SOL`);
-            
-            return {
-                success: true,
-                signature: signature,
-                tokensSold: tokensToSell,
-                solReceived: actualSOLReceived
-            };
-            
-        } catch (error) {
-            console.error('❌ Sell test failed:', error.message);
-            return { success: false, error: error.message };
-        }
-    }
-
-    async runFullTest(tokenAddress, testMode = 'both') {
-        try {
-            console.log('🧪 PUMPSWAP SERVICE FULL TEST');
-            console.log('='.repeat(60));
-            console.log(`🎯 Token: ${tokenAddress}`);
-            console.log(`🔧 Mode: ${testMode}`);
-            console.log(`💰 Buy Amount: ${this.config.buyAmount} SOL`);
-            console.log(`💸 Sell Percentage: ${this.config.sellPercentage}%`);
-            console.log(`📊 Slippage: ${this.config.slippage}%`);
-            console.log('');
-            
-            // Check wallet balance
-            const initialBalance = await this.getWalletBalance();
-            console.log(`💼 Initial wallet balance: ${initialBalance.toFixed(6)} SOL`);
-            
-            if (initialBalance < this.config.buyAmount + 0.001) {
-                throw new Error(`Insufficient balance: ${initialBalance.toFixed(6)} SOL < ${this.config.buyAmount + 0.001} SOL needed`);
-            }
-            
-            // Show market information
-            const hasMarket = await this.showMarketInfo(tokenAddress);
-            if (!hasMarket) {
-                throw new Error('Token does not have a PumpSwap pool');
-            }
-            
-            let buyResult = null;
-            let sellResult = null;
-            
-            // Test buy operation
-            if (testMode === 'buy' || testMode === 'both') {
-                buyResult = await this.testBuy(tokenAddress, this.config.buyAmount);
-                
-                if (!buyResult.success) {
-                    throw new Error(`Buy failed: ${buyResult.error}`);
-                }
-                
-                // Wait a moment for balance to update
-                console.log('\n⏳ Waiting 3 seconds for balance update...');
-                await new Promise(resolve => setTimeout(resolve, 3000));
-            }
-            
-            // Test sell operation
-            if (testMode === 'sell' || testMode === 'both') {
-                sellResult = await this.testSell(tokenAddress, this.config.sellPercentage);
-                
-                if (!sellResult.success) {
-                    console.warn(`❌ Sell failed: ${sellResult.error}`);
-                    console.log('💡 This might be normal if you have no tokens to sell');
-                }
-            }
-            
-            // Final summary
-            console.log('\n📊 TEST RESULTS SUMMARY');
-            console.log('='.repeat(40));
-            
-            const finalBalance = await this.getWalletBalance();
-            const netChange = finalBalance - initialBalance;
-            
-            console.log(`💼 Initial Balance: ${initialBalance.toFixed(6)} SOL`);
-            console.log(`💼 Final Balance: ${finalBalance.toFixed(6)} SOL`);
-            console.log(`📊 Net Change: ${netChange > 0 ? '+' : ''}${netChange.toFixed(6)} SOL`);
-            
-            if (buyResult) {
-                console.log(`🛒 Buy Result: ${buyResult.success ? '✅ SUCCESS' : '❌ FAILED'}`);
-                if (buyResult.success) {
-                    console.log(`   📝 Buy Signature: ${buyResult.signature}`);
-                }
-            }
-            
-            if (sellResult) {
-                console.log(`💸 Sell Result: ${sellResult.success ? '✅ SUCCESS' : '❌ FAILED'}`);
-                if (sellResult.success) {
-                    console.log(`   📝 Sell Signature: ${sellResult.signature}`);
-                }
-            }
-            
-            const overallSuccess = (!buyResult || buyResult.success) && (!sellResult || sellResult.success);
-            console.log(`\n🎉 OVERALL TEST: ${overallSuccess ? '✅ SUCCESS' : '⚠️ PARTIAL SUCCESS'}`);
-            
-            if (overallSuccess) {
-                console.log('🚀 PumpSwap service is working correctly!');
+            const marketData = await this.service.getMarketData(tokenAddress);
+            if (marketData) {
+                console.log(`✅ Pool found: ${marketData.poolAddress}`);
+                console.log(`💰 Current price: ${marketData.price.toFixed(12)} SOL per token`);
+                console.log(`🏊 Base reserve: ${marketData.baseReserve.toFixed(2)} tokens`);
+                console.log(`🏊 Quote reserve: ${marketData.quoteReserve.toFixed(6)} SOL`);
+                console.log(`📈 TVL: ~${marketData.tvl.toFixed(2)} SOL`);
+                return marketData;
             } else {
-                console.log('⚠️ Some operations failed - check error messages above');
+                console.log(`❌ No market data found - token may not have a PumpSwap pool`);
+                return null;
             }
-            
         } catch (error) {
-            console.error('❌ Full test failed:', error.message);
+            console.log(`❌ Market info failed: ${error.message}`);
+            return null;
         }
+    }
+
+    showStats() {
+        const stats = this.service.getStats();
+        console.log(`\n📊 PUMPSWAP SERVICE STATS:`);
+        console.log('='.repeat(40));
+        console.log(`   Pools derived: ${stats.poolsDerivied}`);
+        console.log(`   Pools found: ${stats.poolsFound}`);
+        console.log(`   Pools not found: ${stats.poolsNotFound}`);
+        console.log(`   Buys executed: ${stats.buysExecuted}`);
+        console.log(`   Sells executed: ${stats.sellsExecuted}`);
+        console.log(`   Errors: ${stats.errors}`);
+        console.log(`   Success rate: ${stats.successRate}`);
     }
 }
 
-// CLI usage
+// CLI interface
 async function main() {
     const tokenAddress = process.argv[2];
-    const testMode = process.argv[3] || 'both'; // 'buy', 'sell', or 'both'
-    const buyAmount = parseFloat(process.argv[4]) || 0.001;
-    
+    const action = process.argv[3] || 'both';
+    const amount = parseFloat(process.argv[4]) || 0.001;
+    const sellPercentage = parseFloat(process.argv[5]) || 100;
+
     if (!tokenAddress) {
-        console.log('Usage: node scripts/testPumpSwapService.js <TOKEN_ADDRESS> [TEST_MODE] [BUY_AMOUNT]');
+        console.log('Usage: node scripts/testPumpSwapService.js <TOKEN_ADDRESS> [ACTION] [AMOUNT] [SELL_%]');
+        console.log('');
+        console.log('Actions:');
+        console.log('  buy       - Execute only a buy');
+        console.log('  sell      - Execute only a sell');
+        console.log('  both      - Execute buy then sell (default)');
+        console.log('  market    - Show market info only');
+        console.log('  balance   - Check token balance only');
         console.log('');
         console.log('Examples:');
-        console.log('  # Test both buy and sell with 0.001 SOL');
-        console.log('  node scripts/testPumpSwapService.js HQC1xWpfKArsr6g8vBPn6MrgiePPPMPZ7uaHaAxYpump');
+        console.log('  # Buy then sell (full test)');
+        console.log('  node scripts/testPumpSwapService.js FeW9wDTnPWyTGVWLoLy9CVJ4ZYSj9vWcpW73mEnNpump');
         console.log('');
-        console.log('  # Test only buy operation');
-        console.log('  node scripts/testPumpSwapService.js HQC1x... buy');
+        console.log('  # Buy 0.005 SOL worth');
+        console.log('  node scripts/testPumpSwapService.js FeW9wDTn... buy 0.005');
         console.log('');
-        console.log('  # Test only sell operation');
-        console.log('  node scripts/testPumpSwapService.js HQC1x... sell');
+        console.log('  # Sell 1000 tokens');
+        console.log('  node scripts/testPumpSwapService.js FeW9wDTn... sell 1000');
         console.log('');
-        console.log('  # Test with custom buy amount');
-        console.log('  node scripts/testPumpSwapService.js HQC1x... both 0.005');
+        console.log('  # Buy then sell 50%');
+        console.log('  node scripts/testPumpSwapService.js FeW9wDTn... both 0.001 50');
         console.log('');
         console.log('⚠️  WARNING: This executes REAL transactions with REAL SOL!');
         process.exit(1);
     }
-    
+
     // Safety confirmation
-    console.log('⚠️  🚨 REAL TRADING WARNING 🚨 ⚠️');
-    console.log('');
-    console.log('This will execute REAL transactions with REAL SOL!');
-    console.log(`Token: ${tokenAddress}`);
-    console.log(`Mode: ${testMode}`);
-    console.log(`Buy Amount: ${buyAmount} SOL`);
-    console.log('');
-    
-    const readline = require('readline');
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-    
-    const confirm = await new Promise(resolve => {
-        rl.question('Type "EXECUTE" to proceed with real trading: ', resolve);
-    });
-    
-    rl.close();
-    
-    if (confirm !== 'EXECUTE') {
-        console.log('❌ Test cancelled');
-        process.exit(0);
-    }
-    
-    try {
-        const tester = new PumpSwapTester();
-        
-        // Update configuration if custom buy amount provided
-        if (buyAmount) {
-            tester.config.buyAmount = buyAmount;
+    if (action !== 'market' && action !== 'balance') {
+        console.log('⚠️  🚨 REAL PUMPSWAP TRADING WARNING 🚨 ⚠️');
+        console.log('');
+        console.log('This will execute REAL PumpSwap transactions with REAL SOL!');
+        console.log(`Token: ${tokenAddress}`);
+        console.log(`Action: ${action}`);
+        console.log(`Amount: ${amount}`);
+        if (action === 'both') {
+            console.log(`Sell percentage: ${sellPercentage}%`);
         }
+        console.log('');
+
+        const readline = require('readline');
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+
+        const confirm = await new Promise(resolve => {
+            rl.question('Type "EXECUTE" to proceed with REAL PumpSwap trading: ', resolve);
+        });
+
+        rl.close();
+
+        if (confirm !== 'EXECUTE') {
+            console.log('❌ Trading cancelled');
+            process.exit(0);
+        }
+    }
+
+    try {
+        const tester = new SimplePumpSwapTester();
+
+        // Show market info first
+        console.log(`🧪 PUMPSWAP SERVICE TEST`);
+        console.log('='.repeat(60));
+        const marketData = await tester.showMarketInfo(tokenAddress);
         
-        await tester.runFullTest(tokenAddress, testMode);
-        
+        if (!marketData && action !== 'market') {
+            console.log(`❌ Cannot proceed - token doesn't have a PumpSwap pool`);
+            process.exit(1);
+        }
+
+        // Execute requested action
+        switch (action) {
+            case 'market':
+                // Already showed market info above
+                break;
+                
+            case 'balance':
+                await tester.getTokenBalance(tokenAddress);
+                break;
+                
+            case 'buy':
+                await tester.testBuy(tokenAddress, amount);
+                break;
+                
+            case 'sell':
+                await tester.testSell(tokenAddress, amount);
+                break;
+                
+            case 'both':
+            default:
+                await tester.testBuyThenSell(tokenAddress, amount, sellPercentage);
+                break;
+        }
+
+        // Show final stats
+        tester.showStats();
+        console.log(`\n✅ Test completed!`);
+
     } catch (error) {
-        console.error('❌ PumpSwap test failed:', error);
-        console.log('\n🔧 TROUBLESHOOTING:');
-        console.log('1. Make sure pumpswap-idl.json exists in project root');
-        console.log('2. Check your .env file has PRIVATE_KEY');
-        console.log('3. Ensure sufficient SOL balance');
-        console.log('4. Verify token has a PumpSwap pool');
-        console.log('5. Check network connectivity');
+        console.error(`❌ Test failed:`, error.message);
         process.exit(1);
     }
 }
@@ -476,4 +287,4 @@ if (require.main === module) {
     main();
 }
 
-module.exports = PumpSwapTester;
+module.exports = SimplePumpSwapTester;
