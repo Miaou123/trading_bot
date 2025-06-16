@@ -1,19 +1,19 @@
-// src/app.js - Trading bot with MigrationMonitor for pool detection
+// src/app.js - Trading bot with creation/migration modes
 require('dotenv').config();
 const logger = require('./utils/logger');
-const MigrationMonitor = require('./services/migrationMonitor'); // Changed from tradingWebSocket
+const MigrationMonitor = require('./services/migrationMonitor');
 const TradingBot = require('./bot/tradingBot');
 const PositionManager = require('./bot/positionManager');
 
 class TradingApp {
     constructor() {
-        // 🔥 BOT MODE CONFIGURATION - Only migration mode supported with MigrationMonitor
-        this.botMode = 'migration'; // MigrationMonitor only supports migrations
+        // 🔥 BOT MODE CONFIGURATION
+        this.botMode = process.env.BOT_MODE || 'migration'; // 'creation', 'migration', 'both'
         
         this.config = {
             tradingMode: process.env.TRADING_MODE || 'paper',
             initialInvestment: parseFloat(process.env.INITIAL_INVESTMENT_SOL) || 0.01,
-            minTwitterLikes: parseInt(process.env.MIN_TWITTER_LIKES) || 100,
+            minTwitterLikes: parseInt(process.env.MIN_TWITTER_LIKES) || 1,
             maxPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS) || 10
         };
 
@@ -28,7 +28,7 @@ class TradingApp {
             initialInvestment: this.config.initialInvestment
         });
 
-        // 🔥 REPLACED: Use MigrationMonitor for direct pool monitoring
+        // 🔥 USE MIGRATION MONITOR FOR POOL MONITORING
         this.migrationMonitor = new MigrationMonitor({
             minLikes: this.config.minTwitterLikes
         });
@@ -43,6 +43,13 @@ class TradingApp {
         this.migrationMonitor.on('qualifiedToken', async (tokenData) => {
             const eventType = tokenData.eventType || 'migration';
             
+            // This check is now redundant since we're only monitoring migrations
+            // But keeping it as a safety net
+            if (!this.shouldProcessEvent(eventType)) {
+                logger.info(`⏭️ SKIPPED: ${tokenData.token.symbol} (${eventType}) - Bot mode: ${this.botMode}`);
+                return;
+            }
+            
             logger.info(`💰 PROCESSING: ${tokenData.token.symbol} (${eventType}) - ${tokenData.twitter.likes} likes`);
             
             try {
@@ -50,7 +57,8 @@ class TradingApp {
                     token: tokenData.token,
                     twitter: tokenData.twitter,
                     confidence: 'MEDIUM',
-                    migration: tokenData.migration
+                    migration: tokenData.migration,
+                    eventType: eventType
                 });
             } catch (error) {
                 logger.error(`Error processing token ${tokenData.token.symbol}:`, error);
@@ -62,13 +70,28 @@ class TradingApp {
         });
     }
 
+    // 🔥 MODE CHECKING LOGIC
+    shouldProcessEvent(eventType) {
+        switch (this.botMode) {
+            case 'creation':
+                return eventType === 'creation';
+            case 'migration':  
+                return eventType === 'migration';
+            case 'both':
+                return true;
+            default:
+                logger.warn(`Unknown bot mode: ${this.botMode}, defaulting to 'migration'`);
+                return eventType === 'migration';
+        }
+    }
+
     async start() {
         if (this.isRunning) return;
 
         try {
             logger.info('🚀 Starting trading bot with MigrationMonitor...');
             logger.info(`📊 Mode: ${this.config.tradingMode.toUpperCase()}`);
-            logger.info(`🎯 Bot Mode: MIGRATION (pool monitoring)`);
+            logger.info(`🎯 Bot Mode: ${this.botMode.toUpperCase()} (pool monitoring)`);
             logger.info(`🐦 Min Twitter likes: ${this.config.minTwitterLikes}`);
             
             // Log what events will be processed
@@ -76,14 +99,14 @@ class TradingApp {
 
             await this.tradingBot.initialize();
             
-            // 🔥 CHANGED: Start MigrationMonitor instead of WebSocket
-            const monitoringStarted = await this.migrationMonitor.startMonitoring();
-            if (!monitoringStarted) {
-                throw new Error('Failed to start migration monitoring');
-            }
+            // Start migration monitoring
+            await this.migrationMonitor.startMonitoring();
 
             this.isRunning = true;
-            logger.info('✅ Trading bot started with MigrationMonitor');
+            logger.info('✅ Trading bot started');
+
+            // Log stats periodically
+            this.startStatsLogging();
 
         } catch (error) {
             logger.error('❌ Failed to start:', error);
@@ -92,9 +115,40 @@ class TradingApp {
     }
 
     logModeConfiguration() {
-        logger.info('🔄 MIGRATION MODE: Direct PumpSwap pool monitoring via Helius');
-        logger.info('📡 Method: Solana program account change subscription');
-        logger.info('🎯 Target: New PumpSwap pool creation events');
+        switch (this.botMode) {
+            case 'creation':
+                logger.info('🆕 CREATION MODE: Only processing new token creations (Note: Using migration monitor - no creation events will be detected)');
+                logger.warn('⚠️ WARNING: Bot mode is set to "creation" but only migration monitoring is available');
+                break;
+            case 'migration':
+                logger.info('🔄 MIGRATION MODE: Direct PumpSwap pool monitoring via Helius');
+                logger.info('📡 Method: Solana program account change subscription');
+                logger.info('🎯 Target: New PumpSwap pool creation events');
+                break;
+            case 'both':
+                logger.info('🔄 BOTH MODE: Processing creations and migrations (Note: Only migrations will be detected)');
+                logger.warn('⚠️ WARNING: Bot mode is set to "both" but only migration monitoring is available');
+                break;
+            default:
+                logger.warn(`⚠️ Unknown mode: ${this.botMode}, defaulting to migration monitoring`);
+        }
+    }
+
+    startStatsLogging() {
+        // Log stats every 2 minutes
+        setInterval(() => {
+            if (this.isRunning) {
+                const migrationStats = this.migrationMonitor.getStatsString();
+                const botStats = this.tradingBot.getStats();
+                const positionStats = this.positionManager.getPerformanceStats();
+                
+                logger.info('📊 === BOT STATS ===');
+                logger.info(`Migration: ${migrationStats}`);
+                logger.info(`Trading: ${botStats.tradesExecuted} trades (${botStats.liveTrades} live, ${botStats.paperTrades} paper)`);
+                logger.info(`Positions: ${positionStats.activePositions} active, ${positionStats.totalRealizedPnL} realized PnL`);
+                logger.info(`Performance: Win rate ${positionStats.winRate}, ${positionStats.totalUnrealizedPnL} unrealized PnL`);
+            }
+        }, 120000); // Every 2 minutes
     }
 
     async stop() {
@@ -102,7 +156,6 @@ class TradingApp {
 
         logger.info('🛑 Stopping trading bot...');
         
-        // 🔥 CHANGED: Stop MigrationMonitor instead of WebSocket
         await this.migrationMonitor.stopMonitoring();
         await this.tradingBot.stop();
         await this.positionManager.savePositions();
@@ -126,20 +179,26 @@ class TradingApp {
         return {
             isRunning: this.isRunning,
             mode: this.config.tradingMode,
-            botMode: 'migration',
+            botMode: this.botMode,
             minLikes: this.config.minTwitterLikes,
             maxPositions: this.config.maxPositions,
             positions: this.positionManager.getActivePositionsCount(),
-            
-            // Migration monitor stats
-            monitoring: {
-                isActive: migrationStats.isMonitoring,
+            migrationMonitor: {
+                isMonitoring: migrationStats.isMonitoring,
                 poolsDetected: migrationStats.stats.poolsDetected,
-                migrationsProcessed: migrationStats.stats.migrationsProcessed,
                 migrationsQualified: migrationStats.stats.migrationsQualified,
-                qualificationRate: migrationStats.qualificationRate,
-                subscriptionId: migrationStats.subscriptionId
+                qualificationRate: migrationStats.qualificationRate
             }
+        };
+    }
+
+    // 🔥 NEW: Get detailed status for debugging
+    getDetailedStatus() {
+        return {
+            ...this.getStatus(),
+            tradingBotStats: this.tradingBot.getStats(),
+            positionManagerStats: this.positionManager.getPerformanceStats(),
+            migrationMonitorStats: this.migrationMonitor.getStats()
         };
     }
 }
