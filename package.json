@@ -17,6 +17,7 @@
     "@pump-fun/pump-swap-sdk": "^0.0.1-beta.36",
     "@solana/spl-token": "^0.3.11",
     "@solana/web3.js": "^1.98.2",
+    "anchor": "^1.4.1",
     "axios": "^1.9.0",
     "big.js": "^6.2.2",
     "bs58": "^6.0.0",

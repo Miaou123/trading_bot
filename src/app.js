@@ -12,13 +12,14 @@ class TradingApp {
         
         this.config = {
             tradingMode: process.env.TRADING_MODE || 'paper',
-            initialInvestment: parseFloat(process.env.INITIAL_INVESTMENT_SOL) || 0.1,
-            minTwitterLikes: parseInt(process.env.MIN_TWITTER_LIKES) || 100
+            initialInvestment: parseFloat(process.env.INITIAL_INVESTMENT_SOL) || 0.01,
+            minTwitterLikes: parseInt(process.env.MIN_TWITTER_LIKES) || 100,
+            maxPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS) || 10
         };
 
         this.positionManager = new PositionManager({
             tradingMode: this.config.tradingMode,
-            maxPositions: 5
+            maxPositions: this.config.maxPositions 
         });
 
         this.tradingBot = new TradingBot({
@@ -56,7 +57,8 @@ class TradingApp {
                 await this.tradingBot.processAlert({
                     token: tokenData.token,
                     twitter: tokenData.twitter,
-                    confidence: 'MEDIUM'
+                    confidence: 'MEDIUM',
+                    migration: tokenData.migration
                 });
             } catch (error) {
                 logger.error(`Error processing token ${tokenData.token.symbol}:`, error);
@@ -151,6 +153,7 @@ class TradingApp {
             mode: this.config.tradingMode,
             botMode: this.botMode,
             minLikes: this.config.minTwitterLikes,
+            maxPositions: this.config.maxPositions,
             positions: this.positionManager.getActivePositionsCount(),
             connected: this.webSocket.isConnected
         };
