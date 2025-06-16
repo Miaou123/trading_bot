@@ -1,4 +1,4 @@
-// src/bot/tradingBot.js - CLEAN: Delegates to PumpSwapService
+// src/bot/tradingBot.js - PumpSwap integrated trading bot
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
 const PumpSwapService = require('../services/pumpSwapService');
@@ -22,12 +22,17 @@ class TradingBot extends EventEmitter {
 
         this.positionManager = config.positionManager;
         
-        // 🚀 SINGLE SOURCE OF TRUTH: PumpSwapService handles ALL PumpSwap operations
+        // PumpSwap service handles all trading operations
         this.pumpSwapService = new PumpSwapService({
             privateKey: this.config.privateKey,
             slippageTolerance: this.config.slippageTolerance,
             rpcUrl: config.rpcUrl
         });
+        
+        // Connect this bot to the position manager
+        if (this.positionManager) {
+            this.positionManager.setTradingBot(this);
+        }
         
         // Trading statistics
         this.stats = {
@@ -49,11 +54,18 @@ class TradingBot extends EventEmitter {
 
     async initialize() {
         try {
-            logger.info('🔧 Initializing trading bot...');
+            logger.info('🔧 Initializing PumpSwap trading bot...');
             logger.info(`💰 Trading mode: ${this.config.tradingMode.toUpperCase()}`);
+            logger.info(`🎯 Initial investment: ${this.config.initialInvestment} SOL`);
+            logger.info(`🛡️ Stop loss: ${this.config.stopLossPercentage}%`);
+            logger.info(`💧 Slippage tolerance: ${this.config.slippageTolerance}%`);
             
-            // The PumpSwapService handles all initialization internally
-            logger.info('✅ Trading bot initialized (PumpSwap service ready)');
+            // Check if PumpSwap service is ready
+            if (this.pumpSwapService.wallet) {
+                logger.info(`💼 Wallet: ${this.pumpSwapService.wallet.publicKey.toString()}`);
+            }
+            
+            logger.info('✅ PumpSwap trading bot initialized');
             this.isInitialized = true;
         } catch (error) {
             logger.error('❌ Failed to initialize:', error);
@@ -61,20 +73,15 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    // 🚀 DELEGATE: Price fetching to PumpSwapService
+    // Get current token price using PumpSwap
     async getTokenPrice(tokenAddress, forceRefresh = false, migrationPool = null) {
         try {
-            // Let PumpSwapService handle all price logic
             const marketData = await this.pumpSwapService.getMarketData(tokenAddress);
             if (marketData && marketData.price) {
-                return {
-                    price: marketData.price,
-                    poolAddress: marketData.poolAddress,
-                    source: 'pumpswap_service'
-                };
+                return marketData.price; // Return just the price number
             }
             
-            throw new Error('Price not available');
+            throw new Error('Price not available from PumpSwap');
         } catch (error) {
             this.stats.errors++;
             logger.error(`❌ Price fetch failed for ${tokenAddress}: ${error.message}`);
@@ -82,7 +89,7 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    // 🚀 DELEGATE: Pool derivation to PumpSwapService
+    // Find pool address using PumpSwap service
     async findPoolAddress(tokenAddress) {
         try {
             return await this.pumpSwapService.findPool(tokenAddress);
@@ -92,7 +99,7 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    // 🚀 MAIN: Execute buy (delegates to service for live trades)
+    // Execute buy order
     async executeBuy(alert) {
         try {
             const tokenAddress = alert.token.address;
@@ -102,7 +109,7 @@ class TradingBot extends EventEmitter {
             logger.info(`💰 Executing BUY: ${investmentAmount} SOL → ${symbol}`);
 
             if (this.config.tradingMode === 'live') {
-                // 🚀 LIVE TRADING: Delegate to PumpSwapService
+                // Live trading via PumpSwap
                 const result = await this.pumpSwapService.executeBuy(
                     tokenAddress, 
                     investmentAmount, 
@@ -110,8 +117,8 @@ class TradingBot extends EventEmitter {
                 );
                 
                 if (result.success) {
-                    const currentPrice = investmentAmount / result.tokensReceived; // Calculate actual price
-                    const position = await this.createPosition(alert, investmentAmount, currentPrice, result);
+                    const currentPrice = investmentAmount / result.tokensReceived;
+                    const position = await this.createLivePosition(alert, investmentAmount, currentPrice, result);
                     
                     this.stats.liveTrades++;
                     this.stats.buyOrders++;
@@ -131,10 +138,10 @@ class TradingBot extends EventEmitter {
                 
                 throw new Error('PumpSwap buy failed');
             } else {
-                // 📝 PAPER TRADING: Use service for price, simulate trade
+                // Paper trading
                 const priceInfo = await this.getTokenPrice(tokenAddress, true);
-                const expectedTokens = investmentAmount / priceInfo.price;
-                const position = await this.createPaperPosition(alert, investmentAmount, priceInfo.price, expectedTokens);
+                const expectedTokens = investmentAmount / priceInfo;
+                const position = await this.createPaperPosition(alert, investmentAmount, priceInfo, expectedTokens);
                 
                 this.stats.paperTrades++;
                 this.stats.buyOrders++;
@@ -144,7 +151,7 @@ class TradingBot extends EventEmitter {
                     type: 'PAPER_BUY',
                     symbol: symbol,
                     amount: expectedTokens,
-                    price: priceInfo.price,
+                    price: priceInfo,
                     method: 'simulated'
                 });
                 
@@ -158,11 +165,11 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    // 🚀 MAIN: Execute sell (delegates to service for live trades)
+    // Execute sell order (called by position manager)
     async executePumpSwapSell(position, sellPercentage, reason = 'Manual Sell') {
         try {
             if (this.config.tradingMode === 'live') {
-                // 🚀 LIVE TRADING: Delegate to PumpSwapService
+                // Live selling via PumpSwap
                 const tokenAmount = parseFloat(position.remainingQuantity) * (sellPercentage / 100);
                 
                 const result = await this.pumpSwapService.executeSell(
@@ -224,7 +231,7 @@ class TradingBot extends EventEmitter {
                 
                 throw new Error('PumpSwap sell failed');
             } else {
-                // 📝 PAPER TRADING: Simulate sell
+                // Paper trading simulation
                 return await this.simulatePaperSell(position, sellPercentage, reason);
             }
 
@@ -235,8 +242,8 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    // 🚀 HELPER: Create live position
-    async createPosition(alert, investmentAmount, currentPrice, tradeResult) {
+    // Create live position
+    async createLivePosition(alert, investmentAmount, currentPrice, tradeResult) {
         const stopLossPrice = this.calculateStopLossPrice(currentPrice);
         const takeProfitPrices = this.calculateTakeProfitPrices(currentPrice);
 
@@ -255,9 +262,12 @@ class TradingBot extends EventEmitter {
             remainingQuantity: tradeResult.tokensReceived.toString(),
             alert: alert,
             paperTrade: false,
-            poolAddress: tradeResult.poolAddress || null,
+            priceSource: 'pumpswap_service',
+            migrationPool: null,
+            poolAddress: null, // Will be derived when needed
             eventType: alert.eventType || 'creation',
-            tradingMethod: 'pumpswap_service'
+            isMigration: alert.migration ? true : false,
+            tradingMethod: 'pumpswap'
         };
 
         if (this.positionManager) {
@@ -267,7 +277,7 @@ class TradingBot extends EventEmitter {
         return position;
     }
 
-    // 🚀 HELPER: Create paper position
+    // Create paper position
     async createPaperPosition(alert, investmentAmount, currentPrice, expectedTokens) {
         const stopLossPrice = this.calculateStopLossPrice(currentPrice);
         const takeProfitPrices = this.calculateTakeProfitPrices(currentPrice);
@@ -287,8 +297,12 @@ class TradingBot extends EventEmitter {
             remainingQuantity: expectedTokens.toString(),
             alert: alert,
             paperTrade: true,
+            priceSource: 'pumpswap_service',
+            migrationPool: null,
+            poolAddress: null, // Will be derived when needed
             eventType: alert.eventType || 'creation',
-            tradingMethod: 'simulated'
+            isMigration: alert.migration ? true : false,
+            tradingMethod: 'pumpswap'
         };
 
         if (this.positionManager) {
@@ -298,7 +312,7 @@ class TradingBot extends EventEmitter {
         return position;
     }
 
-    // 🚀 HELPER: Simulate paper sell
+    // Simulate paper sell
     async simulatePaperSell(position, sellPercentage, reason) {
         const tokenAmount = parseFloat(position.remainingQuantity) * (sellPercentage / 100);
         const currentPrice = position.currentPrice || position.entryPrice;
@@ -336,11 +350,12 @@ class TradingBot extends EventEmitter {
         };
     }
 
-    // Helper methods
+    // Calculate stop loss price
     calculateStopLossPrice(entryPrice) {
         return entryPrice * (1 - this.config.stopLossPercentage / 100);
     }
 
+    // Calculate take profit levels
     calculateTakeProfitPrices(entryPrice) {
         return this.config.takeProfitLevels.map((level, index) => ({
             targetPrice: entryPrice * (1 + level.percentage / 100),
@@ -351,10 +366,12 @@ class TradingBot extends EventEmitter {
         }));
     }
 
+    // Generate unique position ID
     generatePositionId() {
         return 'pos_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
 
+    // Process incoming alerts
     async processAlert(alert) {
         if (!this.isTradingEnabled || !this.isInitialized) return;
 
@@ -375,8 +392,8 @@ class TradingBot extends EventEmitter {
         }
     }
 
+    // Get trading statistics
     getStats() {
-        // Combine trading bot stats with PumpSwap service stats
         const serviceStats = this.pumpSwapService.getStats();
         
         return {
@@ -398,16 +415,21 @@ class TradingBot extends EventEmitter {
                 poolsNotFound: serviceStats.poolsNotFound,
                 buysExecuted: serviceStats.buysExecuted,
                 sellsExecuted: serviceStats.sellsExecuted,
-                successRate: serviceStats.successRate
+                successRate: serviceStats.successRate,
+                wallet: serviceStats.wallet
             },
             
             config: {
                 mode: this.config.tradingMode,
-                tradingMethod: 'PumpSwap Service Integration'
+                initialInvestment: this.config.initialInvestment + ' SOL',
+                stopLoss: this.config.stopLossPercentage + '%',
+                slippage: this.config.slippageTolerance + '%',
+                tradingMethod: 'PumpSwap Integration'
             }
         };
     }
 
+    // Trading controls
     pauseTrading() {
         this.isTradingEnabled = false;
         logger.info('⏸️ Trading paused');
@@ -420,7 +442,7 @@ class TradingBot extends EventEmitter {
 
     async stop() {
         this.pauseTrading();
-        logger.info('🛑 Trading bot stopped');
+        logger.info('🛑 PumpSwap trading bot stopped');
     }
 }
 

@@ -4,8 +4,8 @@ const { AccountLayout, NATIVE_MINT, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_I
 const { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } = require('@solana/spl-token');
 const BN = require('bn.js');
 const logger = require('../utils/logger');
-const bs58 = require('bs58');
 const anchor = require('@coral-xyz/anchor');
+const bs58 = require('bs58');
 
 class PumpSwapService {
     constructor(config = {}) {
@@ -76,7 +76,8 @@ class PumpSwapService {
                 if (privateKey.startsWith('[')) {
                     secretKey = new Uint8Array(JSON.parse(privateKey));
                 } else {
-                    secretKey = bs58.decode(privateKey);
+                    // Fix for bs58 v6.0.0 - use default export
+                    secretKey = bs58.default.decode(privateKey);
                 }
             } else {
                 secretKey = privateKey;
@@ -85,7 +86,6 @@ class PumpSwapService {
             this.wallet = Keypair.fromSecretKey(secretKey);
             logger.info(`💼 Wallet initialized: ${this.wallet.publicKey.toString()}`);
             
-            // Initialize Anchor if IDL is already loaded
             if (this.idl) {
                 this.initializeAnchor();
             }
@@ -119,29 +119,26 @@ class PumpSwapService {
         }
     }
 
-    // Derive pool address from token mint
     async findPool(tokenMint) {
         try {
             const mintPubkey = new PublicKey(tokenMint);
             logger.info(`🔍 Deriving PumpSwap pool for: ${tokenMint}`);
             
-            // Step 1: Derive pool authority from Pump.fun program
             const [poolAuthority] = PublicKey.findProgramAddressSync(
                 [Buffer.from("pool-authority"), mintPubkey.toBytes()],
                 this.PUMP_PROGRAM_ID
             );
             
-            // Step 2: Derive pool address from PumpSwap program
             const poolIndexBuffer = Buffer.alloc(2);
-            poolIndexBuffer.writeUInt16LE(0, 0); // Pool index 0 (canonical)
+            poolIndexBuffer.writeUInt16LE(0, 0);
             
             const [poolPda] = PublicKey.findProgramAddressSync(
                 [
                     Buffer.from("pool"),
                     poolIndexBuffer,
                     poolAuthority.toBytes(),
-                    mintPubkey.toBytes(),          // base mint (token)
-                    this.WSOL_MINT.toBytes()       // quote mint (WSOL)
+                    mintPubkey.toBytes(),
+                    this.WSOL_MINT.toBytes()
                 ],
                 this.PUMPSWAP_PROGRAM_ID
             );
@@ -149,7 +146,6 @@ class PumpSwapService {
             logger.info(`✅ Pool derived: ${poolPda.toString()}`);
             this.stats.poolsDerivied++;
             
-            // Verify pool exists
             const poolAccountInfo = await this.connection.getAccountInfo(poolPda);
             if (poolAccountInfo) {
                 logger.info(`✅ Pool exists on-chain!`);
@@ -168,7 +164,6 @@ class PumpSwapService {
         }
     }
 
-    // Get pool coin creator (from your .ts code)
     async getPoolCoinCreator(poolAddress) {
         try {
             const poolAccountInfo = await this.connection.getAccountInfo(poolAddress);
@@ -184,7 +179,6 @@ class PumpSwapService {
         }
     }
 
-    // Get protocol fee recipients (from your .ts code)
     async getProtocolFeeRecipients() {
         try {
             const [globalConfig] = PublicKey.findProgramAddressSync(
@@ -216,7 +210,6 @@ class PumpSwapService {
         }
     }
 
-    // Calculate expected SOL output for sells (from your .ts code)
     async getExpectedSolOutput(poolAddress, sellTokenAmount, baseMint) {
         try {
             const poolBaseTokenAccount = getAssociatedTokenAddressSync(baseMint, poolAddress, true);
@@ -230,7 +223,6 @@ class PumpSwapService {
             const baseReserve = new BN(baseReserveInfo.value.amount);
             const quoteReserve = new BN(quoteReserveInfo.value.amount);
 
-            // AMM constant product formula
             const k = baseReserve.mul(quoteReserve);
             const newBaseReserve = baseReserve.add(sellTokenAmount);
             const newQuoteReserve = k.div(newBaseReserve);
@@ -243,7 +235,6 @@ class PumpSwapService {
         }
     }
 
-    // 🚀 REAL BUY EXECUTION - Based on your .ts code patterns
     async executeBuy(tokenMint, solAmount, slippage = null) {
         try {
             if (!this.wallet || !this.program) {
@@ -260,7 +251,6 @@ class PumpSwapService {
             const mintPubkey = new PublicKey(tokenMint);
             const quoteMint = this.WSOL_MINT;
 
-            // Get required accounts
             const coinCreator = await this.getPoolCoinCreator(poolAddress);
             if (!coinCreator) {
                 throw new Error('Coin creator not found');
@@ -297,13 +287,22 @@ class PumpSwapService {
             const protocolFeeRecipientTokenAccount = getAssociatedTokenAddressSync(quoteMint, protocolFeeRecipient, true);
             const coinCreatorVaultAta = getAssociatedTokenAddressSync(quoteMint, coinCreatorVaultAuthority, true);
 
-            // Calculate amounts
-            const quoteAmountIn = new BN(solAmount * 1e9); // Convert SOL to lamports
-            const minBaseOut = new BN(0); // Accept any amount for testing
+            // Calculate amounts - Following IDL: buy(base_amount_out, max_quote_amount_in)
+            const maxQuoteAmountIn = new BN(solAmount * 1e9); // Convert SOL to lamports
+            
+            // Calculate expected tokens we'll receive (base_amount_out)
+            const currentPrice = await this.calculatePrice(poolAddress, tokenMint);
+            if (!currentPrice) {
+                throw new Error('Could not get current price');
+            }
+            
+            const slippageToUse = slippage || this.config.slippageTolerance;
+            const slippageFactor = (100 - slippageToUse) / 100;
+            const expectedTokensOut = (solAmount / currentPrice) * slippageFactor;
+            const baseAmountOut = new BN(Math.floor(expectedTokensOut * 1e6)); // Assuming 6 decimals
 
-            logger.info(`💰 Buying with ${solAmount} SOL (${quoteAmountIn.toString()} lamports)`);
+            logger.info(`💰 Buying: max ${solAmount} SOL for ~${(expectedTokensOut / 1e6).toFixed(2)}M tokens`);
 
-            // Build transaction instructions
             const instructions = [];
 
             // Compute budget
@@ -333,7 +332,7 @@ class PumpSwapService {
                 SystemProgram.transfer({
                     fromPubkey: this.wallet.publicKey,
                     toPubkey: userQuoteTokenAccount,
-                    lamports: quoteAmountIn.toNumber(),
+                    lamports: maxQuoteAmountIn.toNumber(),
                 })
             );
 
@@ -344,9 +343,9 @@ class PumpSwapService {
                 data: Buffer.from([17]) // SyncNative instruction
             });
 
-            // PumpSwap buy instruction
+            // PumpSwap buy instruction - Following IDL: buy(base_amount_out, max_quote_amount_in)
             const buyIx = await this.program.methods
-                .buy(quoteAmountIn, minBaseOut)
+                .buy(baseAmountOut, maxQuoteAmountIn)
                 .accounts({
                     pool: poolAddress,
                     user: this.wallet.publicKey,
@@ -372,7 +371,7 @@ class PumpSwapService {
 
             instructions.push(buyIx);
 
-            // Send transaction
+            // Build and send transaction
             const { blockhash } = await this.connection.getLatestBlockhash();
             const message = new TransactionMessage({
                 payerKey: this.wallet.publicKey,
@@ -384,10 +383,12 @@ class PumpSwapService {
             transaction.sign([this.wallet]);
 
             logger.info('📤 Sending buy transaction...');
-            const signature = await this.connection.sendAndConfirmTransaction(transaction, {
-                commitment: 'confirmed',
+            const signature = await this.connection.sendTransaction(transaction, {
                 maxRetries: 3
             });
+            
+            // Wait for confirmation
+            await this.connection.confirmTransaction(signature, 'confirmed');
 
             this.stats.buysExecuted++;
 
@@ -399,6 +400,7 @@ class PumpSwapService {
                 success: true,
                 signature: signature,
                 solSpent: solAmount,
+                tokensReceived: expectedTokensOut,
                 type: 'BUY'
             };
 
@@ -409,7 +411,6 @@ class PumpSwapService {
         }
     }
 
-    // 🚀 REAL SELL EXECUTION - Based on your .ts code patterns
     async executeSell(tokenMint, tokenAmount, slippage = null) {
         try {
             if (!this.wallet || !this.program) {
@@ -426,7 +427,6 @@ class PumpSwapService {
             const mintPubkey = new PublicKey(tokenMint);
             const quoteMint = this.WSOL_MINT;
 
-            // Get required accounts
             const coinCreator = await this.getPoolCoinCreator(poolAddress);
             if (!coinCreator) {
                 throw new Error('Coin creator not found');
@@ -439,8 +439,7 @@ class PumpSwapService {
 
             const protocolFeeRecipient = protocolFeeRecipients[0];
 
-            // Calculate amounts
-            const baseAmountIn = new BN(tokenAmount * 1e6); // Assuming 6 decimals
+            const baseAmountIn = new BN(tokenAmount * 1e6);
             const expectedSolOutput = await this.getExpectedSolOutput(poolAddress, baseAmountIn, mintPubkey);
             const slippageToUse = slippage || this.config.slippageTolerance;
             const slippageFactor = new BN(100 - slippageToUse);
@@ -448,7 +447,6 @@ class PumpSwapService {
 
             logger.info(`💰 Selling ${tokenAmount} tokens for ~${(parseFloat(expectedSolOutput.toString()) / 1e9).toFixed(6)} SOL`);
 
-            // Derive required PDAs
             const [globalConfig] = PublicKey.findProgramAddressSync(
                 [Buffer.from("global_config")],
                 this.PUMPSWAP_PROGRAM_ID
@@ -464,7 +462,6 @@ class PumpSwapService {
                 this.PUMPSWAP_PROGRAM_ID
             );
 
-            // Token accounts
             const userBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
             const userQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, this.wallet.publicKey);
             const poolBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, poolAddress, true);
@@ -472,16 +469,13 @@ class PumpSwapService {
             const protocolFeeRecipientTokenAccount = getAssociatedTokenAddressSync(quoteMint, protocolFeeRecipient, true);
             const coinCreatorVaultAta = getAssociatedTokenAddressSync(quoteMint, coinCreatorVaultAuthority, true);
 
-            // Build transaction instructions
             const instructions = [];
 
-            // Compute budget
             instructions.push(
                 ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 }),
                 ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 })
             );
 
-            // Create WSOL account if needed
             instructions.push(
                 createAssociatedTokenAccountIdempotentInstruction(
                     this.wallet.publicKey,
@@ -491,7 +485,6 @@ class PumpSwapService {
                 )
             );
 
-            // PumpSwap sell instruction
             const sellIx = await this.program.methods
                 .sell(baseAmountIn, minQuoteOut)
                 .accounts({
@@ -519,7 +512,6 @@ class PumpSwapService {
 
             instructions.push(sellIx);
 
-            // Send transaction
             const { blockhash } = await this.connection.getLatestBlockhash();
             const message = new TransactionMessage({
                 payerKey: this.wallet.publicKey,
@@ -531,10 +523,12 @@ class PumpSwapService {
             transaction.sign([this.wallet]);
 
             logger.info('📤 Sending sell transaction...');
-            const signature = await this.connection.sendAndConfirmTransaction(transaction, {
-                commitment: 'confirmed',
+            const signature = await this.connection.sendTransaction(transaction, {
                 maxRetries: 3
             });
+            
+            // Wait for confirmation
+            await this.connection.confirmTransaction(signature, 'confirmed');
 
             this.stats.sellsExecuted++;
             const solReceived = parseFloat(expectedSolOutput.toString()) / 1e9;
@@ -559,7 +553,6 @@ class PumpSwapService {
         }
     }
 
-    // Get current token balance
     async getTokenBalance(tokenMint) {
         try {
             if (!this.wallet) return 0;
@@ -574,7 +567,6 @@ class PumpSwapService {
         }
     }
 
-    // Get market data (same as before but cleaner)
     async getMarketData(tokenMint) {
         try {
             logger.info(`📊 Getting market data for: ${tokenMint}`);
@@ -584,7 +576,6 @@ class PumpSwapService {
                 return null;
             }
 
-            // Get pool info and reserves
             const poolInfo = await this.getPoolInfo(poolAddress);
             const reserves = await this.getPoolReserves(poolAddress);
             const price = await this.calculatePrice(poolAddress, tokenMint);
@@ -608,7 +599,6 @@ class PumpSwapService {
         }
     }
 
-    // Helper methods for market data (simplified versions)
     async getPoolInfo(poolAddress) {
         try {
             const poolAccountInfo = await this.connection.getAccountInfo(poolAddress);
