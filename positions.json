@@ -1,54 +1,54 @@
 {
   "active": {
-    "pos_1750125470067_tfhq183p3": {
-      "id": "pos_1750125470067_tfhq183p3",
-      "tokenAddress": "B4g7Hfysomj3AoA8Lcx9FSMd8dkWYdqqV5D21EfEpump",
+    "pos_1750153362932_u54ekoxds": {
+      "id": "pos_1750153362932_u54ekoxds",
+      "tokenAddress": "HMPMa68Zzbx13g3KomQJiH9k9ito9eiUKi4sEEU2pump",
       "symbol": "UNKNOWN",
       "side": "LONG",
-      "entryPrice": 0.0003214500705227335,
-      "quantity": "31.10903035030687",
+      "entryPrice": 4.803676755558831e-7,
+      "quantity": "20817.38740731871",
       "investedAmount": 0.01,
-      "entryTime": 1750125470067,
-      "txHash": "2L2idjAGA7Xt2ZRzSnDkjrHDH2Mxzi4mU3L6yTMpaSabToz4MEe51KMFFLHDKve6rzuDtmvvt1HxkCYTTWmJqQeV",
-      "stopLossPrice": 0.00016072503526136676,
+      "entryTime": 1750153362932,
+      "txHash": "4Z6t9Q7dpRzYCRDs4SgU1Jougobjoy11Cy9kYuSzDnRVpmnR2pBJuu92ZFrR9Zh7T4QrkxvnKLyqNBYf1XwjZ1mm",
+      "stopLossPrice": 2.4018383777794155e-7,
       "takeProfitLevels": [
         {
-          "targetPrice": 0.000642900141045467,
+          "targetPrice": 9.607353511117662e-7,
           "sellPercentage": 50,
           "percentage": 100,
           "triggered": false,
           "level": 1
         },
         {
-          "targetPrice": 0.001285800282090934,
+          "targetPrice": 0.0000019214707022235324,
           "sellPercentage": 25,
           "percentage": 300,
           "triggered": false,
           "level": 2
         },
         {
-          "targetPrice": 0.003214500705227335,
+          "targetPrice": 0.000004803676755558831,
           "sellPercentage": 100,
           "percentage": 900,
           "triggered": false,
           "level": 3
         }
       ],
-      "remainingQuantity": "31.10903035030687",
+      "remainingQuantity": "20817.38740731871",
       "alert": {
         "token": {
-          "address": "B4g7Hfysomj3AoA8Lcx9FSMd8dkWYdqqV5D21EfEpump",
+          "address": "HMPMa68Zzbx13g3KomQJiH9k9ito9eiUKi4sEEU2pump",
           "symbol": "UNKNOWN",
           "name": "Unknown Token"
         },
         "twitter": {
-          "likes": 2640,
-          "url": "https://x.com/tier10k/status/1934684065875284187"
+          "likes": 7,
+          "url": "https://x.com/drhnetwork/status/1934908617003815345"
         },
         "confidence": "MEDIUM",
         "migration": {
           "pool": "pump-amm",
-          "signature": "ZK8GZmmi1zxSd7y9CXjZKfGcskWun9nS72sipycXAKVx2CGvCD5sc9dX4CYX4oms1vtASPMLig9Dk2WLqXaTkW9"
+          "signature": "3Ascpgn5FyzYVDsXZ65u2w9jEqyjNatcSWKr44EkYMmL8ST8z31zTavfQ145zmHvs2mGzMWLyAAsEUx4RkN4XMoA"
         }
       },
       "paperTrade": false,
@@ -58,2844 +58,544 @@
       "eventType": "creation",
       "isMigration": true,
       "tradingMethod": "pumpswap",
-      "createdAt": 1750125470067,
+      "createdAt": 1750153362932,
       "status": "STOP_LOSS_FAILED",
-      "totalPnL": 0,
-      "currentPrice": 2.301735295064487e-8,
-      "currentValue": 7.160475315253367e-7,
-      "unrealizedPnL": -0.009999283952468475,
-      "priceChange": -99.99283952468474,
-      "lastPriceUpdate": 1750151007281,
+      "currentPrice": 2.942849618818556e-7,
+      "currentValue": 0.006126244059642607,
+      "unrealizedPnL": -0.003873755940357393,
+      "priceChange": -38.737559403573925,
+      "lastPriceUpdate": 1750153642252,
       "lastPriceSource": "pool_based",
       "priceHistory": [
         {
-          "timestamp": 1750134658275,
-          "price": 2.512762212284662e-8,
+          "timestamp": 1750153538299,
+          "price": 1.4373271753304224e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750134698302,
-          "price": 2.5127421377492895e-8,
+          "timestamp": 1750153539169,
+          "price": 1.4647202803464207e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750134720216,
-          "price": 2.5127341733076966e-8,
+          "timestamp": 1750153540071,
+          "price": 1.4704245518620107e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750134793336,
-          "price": 2.5638321421647486e-8,
+          "timestamp": 1750153541080,
+          "price": 1.3457738084421466e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750134877211,
-          "price": 2.587292726300004e-8,
+          "timestamp": 1750153542215,
+          "price": 1.67830342414411e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750134897266,
-          "price": 2.564222057683666e-8,
+          "timestamp": 1750153543434,
+          "price": 1.56199358690262e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750134897447,
-          "price": 2.5414028382402104e-8,
+          "timestamp": 1750153544332,
+          "price": 1.555276893949371e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135001392,
-          "price": 2.612457925440119e-8,
+          "timestamp": 1750153545139,
+          "price": 1.5710152538022525e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135028507,
-          "price": 2.566683135313455e-8,
+          "timestamp": 1750153546113,
+          "price": 1.6378732230148426e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135057707,
-          "price": 2.5666454481077003e-8,
+          "timestamp": 1750153547091,
+          "price": 1.5447496174659578e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135072441,
-          "price": 2.582171959204678e-8,
+          "timestamp": 1750153548151,
+          "price": 1.655409406865657e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135165475,
-          "price": 2.5124790063159787e-8,
+          "timestamp": 1750153549157,
+          "price": 1.6921823904535662e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135181468,
-          "price": 2.5432482883452383e-8,
+          "timestamp": 1750153550209,
+          "price": 1.7259148387684336e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135263375,
-          "price": 2.4843032825491265e-8,
+          "timestamp": 1750153551301,
+          "price": 1.8223008009751545e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135372434,
-          "price": 2.4843032267731262e-8,
+          "timestamp": 1750153552245,
+          "price": 1.63194797200173e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135373527,
-          "price": 2.4843031708374285e-8,
+          "timestamp": 1750153553187,
+          "price": 1.6281603759692217e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135414415,
-          "price": 2.4903502663183678e-8,
+          "timestamp": 1750153554147,
+          "price": 1.6337529633790435e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135454586,
-          "price": 2.4756593421907466e-8,
+          "timestamp": 1750153555717,
+          "price": 1.7351863004917462e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135461634,
-          "price": 2.404339258598228e-8,
+          "timestamp": 1750153556155,
+          "price": 1.728408858825872e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135495627,
-          "price": 2.4119151176466636e-8,
+          "timestamp": 1750153557017,
+          "price": 1.7913359858980793e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135501976,
-          "price": 2.414233947207904e-8,
+          "timestamp": 1750153558020,
+          "price": 1.790153516372574e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135502593,
-          "price": 2.416559648455599e-8,
+          "timestamp": 1750153559071,
+          "price": 1.7899156655083736e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135518673,
-          "price": 2.4177172765808722e-8,
+          "timestamp": 1750153560074,
+          "price": 1.7922246484618928e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135519473,
-          "price": 2.4211592832464527e-8,
+          "timestamp": 1750153561146,
+          "price": 1.7937909102482979e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135595620,
-          "price": 2.381321103003654e-8,
+          "timestamp": 1750153562257,
+          "price": 1.8523151221404933e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135725690,
-          "price": 2.3617698075433306e-8,
+          "timestamp": 1750153563206,
+          "price": 1.8587287433128542e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135728656,
-          "price": 2.40831783618911e-8,
+          "timestamp": 1750153564258,
+          "price": 1.8646959670331074e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135756567,
-          "price": 2.3983450344085848e-8,
+          "timestamp": 1750153565086,
+          "price": 1.9082375123665212e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135800704,
-          "price": 2.3933893880536783e-8,
+          "timestamp": 1750153567055,
+          "price": 1.832789494774787e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135801723,
-          "price": 2.388434070785617e-8,
+          "timestamp": 1750153567057,
+          "price": 1.8320687771536195e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135804584,
-          "price": 2.3220331894727005e-8,
+          "timestamp": 1750153568114,
+          "price": 1.764544030348213e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135842690,
-          "price": 2.3711431235023378e-8,
+          "timestamp": 1750153569167,
+          "price": 1.7024129278979922e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135865789,
-          "price": 2.4279928960408294e-8,
+          "timestamp": 1750153570163,
+          "price": 1.6600977356775217e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750135866830,
-          "price": 2.4860894873933234e-8,
+          "timestamp": 1750153571097,
+          "price": 1.6707067786759228e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750136024822,
-          "price": 2.5331470428788706e-8,
+          "timestamp": 1750153572114,
+          "price": 1.6948366333043756e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750136029622,
-          "price": 2.4830544680447715e-8,
+          "timestamp": 1750153573181,
+          "price": 1.7414526732901173e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750136212775,
-          "price": 2.4946911372390223e-8,
+          "timestamp": 1750153575146,
+          "price": 1.7304400705393776e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750136276920,
-          "price": 2.4696319115901805e-8,
+          "timestamp": 1750153576152,
+          "price": 1.7057644229640078e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750136277708,
-          "price": 2.4447746917650177e-8,
+          "timestamp": 1750153577130,
+          "price": 1.7072862695535365e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750136693926,
-          "price": 2.462296250999585e-8,
+          "timestamp": 1750153578168,
+          "price": 1.7072862410433596e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750136725205,
-          "price": 2.462292720198265e-8,
+          "timestamp": 1750153579149,
+          "price": 1.650410464347957e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750136740865,
-          "price": 2.4622886233063254e-8,
+          "timestamp": 1750153580421,
+          "price": 1.6702253762075962e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750136965002,
-          "price": 2.4738764021123766e-8,
+          "timestamp": 1750153581028,
+          "price": 1.6711287981258362e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750137904292,
-          "price": 2.36962550802026e-8,
+          "timestamp": 1750153582468,
+          "price": 1.707575363217654e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750137963199,
-          "price": 2.2855960473961303e-8,
+          "timestamp": 1750153583090,
+          "price": 1.7137460822791925e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750138188280,
-          "price": 2.2871716095877747e-8,
+          "timestamp": 1750153584955,
+          "price": 2.0119862323009484e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750138205375,
-          "price": 2.2889754278762887e-8,
+          "timestamp": 1750153585207,
+          "price": 1.9886383549159525e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750138262380,
-          "price": 2.3158351938709938e-8,
+          "timestamp": 1750153586101,
+          "price": 2.002116775488379e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750138596241,
-          "price": 2.3181098336925426e-8,
+          "timestamp": 1750153587166,
+          "price": 1.9928380659432698e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750139024546,
-          "price": 2.3361120892767355e-8,
+          "timestamp": 1750153588083,
+          "price": 1.994837604627426e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750139135542,
-          "price": 2.3361102452639163e-8,
+          "timestamp": 1750153589174,
+          "price": 2.028005184400139e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750139152482,
-          "price": 2.3360936481873367e-8,
+          "timestamp": 1750153590184,
+          "price": 2.1298503727495105e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750139620717,
-          "price": 2.336079747761007e-8,
+          "timestamp": 1750153591101,
+          "price": 2.1163588670126883e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750139767812,
-          "price": 2.227547715735185e-8,
+          "timestamp": 1750153593176,
+          "price": 2.10783086765059e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750140274096,
-          "price": 2.120912698967641e-8,
+          "timestamp": 1750153594150,
+          "price": 2.101391918132972e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750140298141,
-          "price": 2.123496639439115e-8,
+          "timestamp": 1750153595099,
+          "price": 2.0986378493353448e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750140644145,
-          "price": 2.1235046717660843e-8,
+          "timestamp": 1750153596103,
+          "price": 1.8220280642340987e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750140800369,
-          "price": 2.145250250776242e-8,
+          "timestamp": 1750153598985,
+          "price": 1.8907147259391545e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750140862926,
-          "price": 2.145249939738948e-8,
+          "timestamp": 1750153599288,
+          "price": 2.3063663057042418e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750140863505,
-          "price": 2.145249629378204e-8,
+          "timestamp": 1750153600175,
+          "price": 2.3911283394506127e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750141064901,
-          "price": 2.1890680795520726e-8,
+          "timestamp": 1750153601218,
+          "price": 2.415364065762145e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750141082385,
-          "price": 2.255625706940029e-8,
+          "timestamp": 1750153602027,
+          "price": 2.4211341317840264e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750141599799,
-          "price": 2.2660571702003343e-8,
+          "timestamp": 1750153604131,
+          "price": 2.3957034369105145e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750142415130,
-          "price": 2.3151131101419846e-8,
+          "timestamp": 1750153605512,
+          "price": 2.3854271457123157e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750143070652,
-          "price": 2.2736554631676733e-8,
+          "timestamp": 1750153606252,
+          "price": 2.4316431014488274e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750143180569,
-          "price": 2.291715488170476e-8,
+          "timestamp": 1750153607238,
+          "price": 2.5011260790397525e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750143477767,
-          "price": 2.304452161843572e-8,
+          "timestamp": 1750153608348,
+          "price": 2.5154470731636026e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750143614872,
-          "price": 2.3089908547728992e-8,
+          "timestamp": 1750153609169,
+          "price": 2.6443674897664716e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750143965999,
-          "price": 2.308990725865216e-8,
+          "timestamp": 1750153610156,
+          "price": 2.602167734423907e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750144437182,
-          "price": 2.488051028964516e-8,
+          "timestamp": 1750153611271,
+          "price": 2.490946597226608e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750144562173,
-          "price": 2.4815408675056396e-8,
+          "timestamp": 1750153613416,
+          "price": 2.495763411691892e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750144639381,
-          "price": 2.527353731907263e-8,
+          "timestamp": 1750153614185,
+          "price": 2.500720406347379e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750144722308,
-          "price": 2.536084671457809e-8,
+          "timestamp": 1750153615321,
+          "price": 2.494334443327136e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750144751915,
-          "price": 2.5341525881925074e-8,
+          "timestamp": 1750153616088,
+          "price": 2.4291453440930546e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750144976528,
-          "price": 2.4032706367415857e-8,
+          "timestamp": 1750153617502,
+          "price": 2.857029115559065e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750144993579,
-          "price": 2.2496154603178297e-8,
+          "timestamp": 1750153618160,
+          "price": 2.9782646720213256e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750145126536,
-          "price": 2.2511780580818257e-8,
+          "timestamp": 1750153619164,
+          "price": 3.0053209278812733e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750145127548,
-          "price": 2.4796845511651152e-8,
+          "timestamp": 1750153620251,
+          "price": 2.931662372404861e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750145284716,
-          "price": 2.4926846993833616e-8,
+          "timestamp": 1750153621075,
+          "price": 3.4093503840985233e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750145452779,
-          "price": 2.4973901052207065e-8,
+          "timestamp": 1750153622095,
+          "price": 2.9182739876805186e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750145828977,
-          "price": 2.570631133386856e-8,
+          "timestamp": 1750153623085,
+          "price": 2.6905050692523434e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750145905154,
-          "price": 2.5785583113232952e-8,
+          "timestamp": 1750153624432,
+          "price": 2.7124226046292365e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750145986045,
-          "price": 2.337049504023232e-8,
+          "timestamp": 1750153625265,
+          "price": 2.866023435667741e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750145995040,
-          "price": 2.3447895008248727e-8,
+          "timestamp": 1750153626171,
+          "price": 3.08150341574408e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750146013158,
-          "price": 2.3448739824779582e-8,
+          "timestamp": 1750153627118,
+          "price": 2.970765671476427e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750146014097,
-          "price": 2.3449879027295848e-8,
+          "timestamp": 1750153628317,
+          "price": 3.3089050412915283e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750146277180,
-          "price": 2.3628068072048374e-8,
+          "timestamp": 1750153629362,
+          "price": 3.31737501669767e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750146367279,
-          "price": 2.3632637612610154e-8,
+          "timestamp": 1750153630037,
+          "price": 3.327568788237952e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750146368343,
-          "price": 2.363721717886462e-8,
+          "timestamp": 1750153631201,
+          "price": 3.3237288401214167e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750146576513,
-          "price": 2.345945667684535e-8,
+          "timestamp": 1750153632252,
+          "price": 3.207140701768079e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750147008556,
-          "price": 2.3372039884728876e-8,
+          "timestamp": 1750153633182,
+          "price": 3.198354090676764e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750147190567,
-          "price": 2.3372035463231774e-8,
+          "timestamp": 1750153634133,
+          "price": 3.056372460691893e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750148039074,
-          "price": 2.318645720964391e-8,
+          "timestamp": 1750153635052,
+          "price": 3.0660655430173104e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750148514211,
-          "price": 2.31864468739579e-8,
+          "timestamp": 1750153636188,
+          "price": 2.9761467617307673e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750148807388,
-          "price": 2.3186409006038155e-8,
+          "timestamp": 1750153637141,
+          "price": 3.013120471963033e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750148858370,
-          "price": 2.3017376316289386e-8,
+          "timestamp": 1750153638292,
+          "price": 3.1672042885227715e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750149646839,
-          "price": 2.301736161392964e-8,
+          "timestamp": 1750153639221,
+          "price": 3.0790189393648374e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750149647057,
-          "price": 2.3017368972778745e-8,
+          "timestamp": 1750153640126,
+          "price": 3.00272719379116e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750149647673,
-          "price": 2.301736161392964e-8,
+          "timestamp": 1750153641192,
+          "price": 2.9976343781749564e-7,
           "source": "pool_based"
         },
         {
-          "timestamp": 1750151007281,
-          "price": 2.301735295064487e-8,
+          "timestamp": 1750153642252,
+          "price": 2.942849618818556e-7,
           "source": "pool_based"
         }
       ],
-      "errorMessage": "Simulation failed. \nMessage: Transaction simulation failed: Error processing Instruction 3: custom program error: 0x1. \nLogs: \n[\n  \"Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA invoke [1]\",\n  \"Program log: Instruction: Sell\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]\",\n  \"Program log: Instruction: TransferChecked\",\n  \"Program log: Error: insufficient funds\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4485 of 261251 compute units\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: custom program error: 0x1\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA consumed 38595 of 295361 compute units\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA failed: custom program error: 0x1\"\n]. \nCatch the `SendTransactionError` and call `getLogs()` on it for full details."
+      "errorMessage": "Simulation failed. \nMessage: Transaction simulation failed: Error processing Instruction 3: custom program error: 0x1. \nLogs: \n[\n  \"Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA invoke [1]\",\n  \"Program log: Instruction: Sell\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]\",\n  \"Program log: Instruction: TransferChecked\",\n  \"Program log: Error: insufficient funds\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4485 of 264109 compute units\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: custom program error: 0x1\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA consumed 35737 of 295361 compute units\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA failed: custom program error: 0x1\"\n]. \nCatch the `SendTransactionError` and call `getLogs()` on it for full details."
     }
   },
-  "closed": {
-    "pos_1750114952411_6sp5nlkqt": {
-      "id": "pos_1750114952411_6sp5nlkqt",
-      "tokenAddress": "6C83wDWExugehK4ssij8ZX6FwumMissJixAAEetjkoxq",
-      "symbol": "UNKNOWN",
-      "side": "LONG",
-      "entryPrice": 3.923905475984994e-7,
-      "quantity": "25484.813691873558",
-      "investedAmount": 0.01,
-      "entryTime": 1750114952411,
-      "txHash": "5LkGPRkvMYnKQp4M8pGv33Ti5FL7xRgPDa7d9GvrJFBBC2J2C5y1DbcdbBiEAnMzsbadYM6U68YD5UXwmeeLnYck",
-      "stopLossPrice": 1.961952737992497e-7,
-      "takeProfitLevels": [
-        {
-          "targetPrice": 7.847810951969988e-7,
-          "sellPercentage": 50,
-          "percentage": 100,
-          "triggered": false,
-          "level": 1
-        },
-        {
-          "targetPrice": 0.0000015695621903939976,
-          "sellPercentage": 25,
-          "percentage": 300,
-          "triggered": false,
-          "level": 2
-        },
-        {
-          "targetPrice": 0.000003923905475984994,
-          "sellPercentage": 100,
-          "percentage": 900,
-          "triggered": false,
-          "level": 3
-        }
-      ],
-      "remainingQuantity": "0",
-      "alert": {
-        "token": {
-          "address": "6C83wDWExugehK4ssij8ZX6FwumMissJixAAEetjkoxq",
-          "symbol": "UNKNOWN",
-          "name": "Unknown Token"
-        },
-        "twitter": {
-          "likes": 152,
-          "url": "https://x.com/NewsWire_US/status/1934745611020194262"
-        },
-        "confidence": "MEDIUM",
-        "migration": {
-          "pool": "pump-amm",
-          "signature": "66Q9wN2F18V9DcDc1nTSNXc2mQusXDxgGZTUpZnn1Umdk8mEe2zmsmw7HsgoUB67DGbqGDnKSs2bt6HEWa1C37sQ"
-        }
-      },
-      "paperTrade": false,
-      "priceSource": "pumpswap_service",
-      "migrationPool": null,
-      "poolAddress": null,
-      "eventType": "creation",
-      "isMigration": true,
-      "tradingMethod": "pumpswap",
-      "createdAt": 1750114952412,
-      "status": "CLOSED",
-      "totalPnL": -0.005100426,
-      "currentPrice": 1.9358029229690656e-7,
-      "currentValue": 0.004933357683605089,
-      "unrealizedPnL": -0.005066642316394911,
-      "priceChange": -50.666423163949105,
-      "lastPriceUpdate": 1750115069609,
-      "lastPriceSource": "pool_based",
-      "priceHistory": [
-        {
-          "timestamp": 1750114971464,
-          "price": 3.209236769185705e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114971466,
-          "price": 3.197572237170894e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114971631,
-          "price": 3.196726195825334e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114972570,
-          "price": 3.196910416144402e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114973498,
-          "price": 3.1766521078493056e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114974576,
-          "price": 3.241597715648844e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114975631,
-          "price": 3.161621400613545e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114976516,
-          "price": 3.151513476561685e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114977682,
-          "price": 3.1886442461760877e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114978593,
-          "price": 3.287222350131014e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114979592,
-          "price": 3.120602129072161e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114980499,
-          "price": 3.203349478904169e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114981502,
-          "price": 3.1972621659766333e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114982595,
-          "price": 3.1699871073393613e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114983619,
-          "price": 3.120753557932009e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114984576,
-          "price": 3.157135329219862e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114985550,
-          "price": 3.03451870695422e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114986527,
-          "price": 3.0323483236905363e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114987515,
-          "price": 2.928219156469209e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114988585,
-          "price": 3.077201939340396e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114989586,
-          "price": 3.2568926428264434e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114990510,
-          "price": 3.269879295323382e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114991603,
-          "price": 3.3573407490208814e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114992598,
-          "price": 3.162181607295263e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114993533,
-          "price": 3.157530939323277e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114994598,
-          "price": 3.1676008689036973e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114995516,
-          "price": 3.0977188108733756e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114997030,
-          "price": 2.9104252316669946e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114997950,
-          "price": 3.2270406469335944e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114998612,
-          "price": 3.2258148673914796e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750114999622,
-          "price": 3.294441387582968e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115000522,
-          "price": 3.4260404520063084e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115001500,
-          "price": 3.4762109762226936e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115002586,
-          "price": 3.565576498580729e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115003595,
-          "price": 3.403211759864578e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115004583,
-          "price": 3.398701577265144e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115005600,
-          "price": 3.455375687405187e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115007645,
-          "price": 3.449297597584657e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115007981,
-          "price": 3.2851073105371234e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115008597,
-          "price": 3.253996790676701e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115009603,
-          "price": 3.3506262171312563e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115010611,
-          "price": 3.2985033313776255e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115011899,
-          "price": 3.368848122693582e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115012601,
-          "price": 2.9304923771925854e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115013540,
-          "price": 3.0654067576846795e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115014528,
-          "price": 2.9992959855109434e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115015617,
-          "price": 2.780071211938519e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115017077,
-          "price": 2.5331554009977425e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115017540,
-          "price": 2.5377259000327156e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115018545,
-          "price": 2.645494316195409e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115019590,
-          "price": 2.5792356628552797e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115020547,
-          "price": 2.6846014727446966e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115021606,
-          "price": 2.710656667372063e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115022548,
-          "price": 2.5284437098707444e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115023625,
-          "price": 2.64140709101993e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115024538,
-          "price": 2.885928457319611e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115025603,
-          "price": 2.5348261339733714e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115026547,
-          "price": 2.7244931894206676e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115027541,
-          "price": 2.596199113199706e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115028722,
-          "price": 2.369957801233136e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115029618,
-          "price": 2.2819108893961805e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115030610,
-          "price": 2.063407778961177e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115031582,
-          "price": 2.2296841498793956e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115032611,
-          "price": 2.132689353242694e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115033525,
-          "price": 2.1155000344083493e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115034561,
-          "price": 2.0066562203837081e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115035710,
-          "price": 2.3156056216819458e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115036599,
-          "price": 2.3762967425656906e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115037648,
-          "price": 2.213592261191814e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115038558,
-          "price": 2.2305007367594497e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115039744,
-          "price": 2.2694880727473028e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115040682,
-          "price": 2.169224620307457e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115041557,
-          "price": 2.1134368944733454e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115042534,
-          "price": 2.0895405429459188e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115044591,
-          "price": 2.3216331620924262e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115044699,
-          "price": 2.3359165892774645e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115045729,
-          "price": 2.365527055332718e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115046805,
-          "price": 2.3015122714128286e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115048935,
-          "price": 2.526319283838505e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115049551,
-          "price": 2.528940989835754e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115050952,
-          "price": 2.4507937495401784e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115051629,
-          "price": 2.3614599036863217e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115052550,
-          "price": 2.437606983960905e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115053686,
-          "price": 2.50189910874273e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115054561,
-          "price": 2.4543920361037197e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115055649,
-          "price": 2.3690055789358524e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115056994,
-          "price": 2.3907099763687126e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115057617,
-          "price": 2.1092217610705228e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115058615,
-          "price": 2.2426534545869487e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115059636,
-          "price": 2.1694267854072922e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115060626,
-          "price": 2.045874653316542e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115061606,
-          "price": 2.0353839995026397e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115062620,
-          "price": 2.0271004846547572e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115063711,
-          "price": 2.0115073898013793e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115064641,
-          "price": 2.1445510998634032e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115065691,
-          "price": 2.1602723919412568e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115066633,
-          "price": 1.9855993330168118e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115067574,
-          "price": 1.9661109496676162e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115068558,
-          "price": 1.9352723876443368e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750115069609,
-          "price": 1.9358029229690656e-7,
-          "source": "pool_based"
-        }
-      ],
-      "updatedAt": 1750115069887,
-      "closedAt": 1750115069887,
-      "closeReason": "Stop Loss (-50.7%)"
-    },
-    "pos_1750117961044_cjttj3y5c": {
-      "id": "pos_1750117961044_cjttj3y5c",
-      "tokenAddress": "DxETVgnJVJuvWoSCB5jjvxXWLL9MjPgqXYo1S4kipump",
-      "symbol": "UNKNOWN",
-      "side": "LONG",
-      "entryPrice": 4.802778533651836e-7,
-      "quantity": "20821.28070226967",
-      "investedAmount": 0.01,
-      "entryTime": 1750117961044,
-      "txHash": "4FoJidhprVekQJP8yf9LSrrscgd3SKCsuW8UANegyfNWtNvzb56RbFkVDXCmqbvHZMQwkfSeEx4FWtD8mBScShhf",
-      "stopLossPrice": 2.401389266825918e-7,
-      "takeProfitLevels": [
-        {
-          "targetPrice": 9.605557067303673e-7,
-          "sellPercentage": 50,
-          "percentage": 100,
-          "triggered": false,
-          "level": 1
-        },
-        {
-          "targetPrice": 0.0000019211114134607346,
-          "sellPercentage": 25,
-          "percentage": 300,
-          "triggered": false,
-          "level": 2
-        },
-        {
-          "targetPrice": 0.000004802778533651837,
-          "sellPercentage": 100,
-          "percentage": 900,
-          "triggered": false,
-          "level": 3
-        }
-      ],
-      "remainingQuantity": "0",
-      "alert": {
-        "token": {
-          "address": "DxETVgnJVJuvWoSCB5jjvxXWLL9MjPgqXYo1S4kipump",
-          "symbol": "UNKNOWN",
-          "name": "Unknown Token"
-        },
-        "twitter": {
-          "likes": 7347,
-          "url": "https://x.com/nickjfuentes/status/1934756100613480643"
-        },
-        "confidence": "MEDIUM",
-        "migration": {
-          "pool": "pump-amm",
-          "signature": "3UaCgqdeDbLMVXbUbxX4EdwdRCnmvbYHdRjwfzWiDDkTgufvvJCZFQEpefWP2AtwYift24rR2tH76GcSVbWGDnQD"
-        }
-      },
-      "paperTrade": false,
-      "priceSource": "pumpswap_service",
-      "migrationPool": null,
-      "poolAddress": null,
-      "eventType": "creation",
-      "isMigration": true,
-      "tradingMethod": "pumpswap",
-      "createdAt": 1750117961044,
-      "status": "CLOSED",
-      "totalPnL": -0.005397972,
-      "currentPrice": 2.1708919844017144e-7,
-      "currentValue": 0.004520075138153532,
-      "unrealizedPnL": -0.005479924861846468,
-      "priceChange": -54.79924861846467,
-      "lastPriceUpdate": 1750118140667,
-      "lastPriceSource": "pool_based",
-      "priceHistory": [
-        {
-          "timestamp": 1750118040417,
-          "price": 5.41073094260234e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118041464,
-          "price": 5.115614972840836e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118042347,
-          "price": 5.182715244351399e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118043478,
-          "price": 5.328300793944772e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118044499,
-          "price": 5.16808297581171e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118045492,
-          "price": 5.191576179598781e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118046548,
-          "price": 5.332021991418504e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118047483,
-          "price": 5.199213670606308e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118048357,
-          "price": 5.21969259383704e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118049424,
-          "price": 5.210294153086145e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118050472,
-          "price": 4.4781367322472707e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118051584,
-          "price": 4.872559829183298e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118052412,
-          "price": 4.950038819585189e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118053453,
-          "price": 5.104229936940138e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118054411,
-          "price": 5.101776293667322e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118055411,
-          "price": 5.139385258174486e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118056499,
-          "price": 5.070918430520337e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118057544,
-          "price": 5.021888308778923e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118058720,
-          "price": 4.821871110960967e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118059492,
-          "price": 4.852605932714097e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118060503,
-          "price": 5.440982149295277e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118061480,
-          "price": 5.280670451800137e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118062530,
-          "price": 5.326176314712055e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118063491,
-          "price": 5.342709481252807e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118064490,
-          "price": 5.236920978166418e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118065443,
-          "price": 5.255432810692825e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118066417,
-          "price": 5.246576995204956e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118067441,
-          "price": 5.134366217627658e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118068505,
-          "price": 5.128321415046509e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118069502,
-          "price": 5.074835509370299e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118070803,
-          "price": 4.6696763136327966e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118071420,
-          "price": 4.7502721506288483e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118072509,
-          "price": 4.651322802251081e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118073444,
-          "price": 4.63509200117123e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118074509,
-          "price": 4.32242677154082e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118075566,
-          "price": 4.199920237668312e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118076404,
-          "price": 4.2132420516076264e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118077431,
-          "price": 4.470232585890984e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118078368,
-          "price": 4.536499396615674e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118079534,
-          "price": 4.7110479622478577e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118080552,
-          "price": 4.65524630136368e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118081515,
-          "price": 4.6705080294335466e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118082461,
-          "price": 4.584428817430197e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118083578,
-          "price": 4.3722911473997827e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118084508,
-          "price": 4.355828406706292e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118085423,
-          "price": 4.405304118655957e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118086425,
-          "price": 4.395739866291121e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118087516,
-          "price": 4.5361343188230393e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118088528,
-          "price": 4.531782674522954e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118089695,
-          "price": 4.1715016166027526e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118090507,
-          "price": 3.85731482336064e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118091487,
-          "price": 4.0485149720999673e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118092602,
-          "price": 3.9486016478121017e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118093412,
-          "price": 3.9064336751539635e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118094383,
-          "price": 3.8580013478672307e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118095563,
-          "price": 3.8142179344057506e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118096625,
-          "price": 4.0366751240253683e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118097434,
-          "price": 3.8551587229495025e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118098367,
-          "price": 3.8611404562422905e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118099396,
-          "price": 3.869425362458091e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118100464,
-          "price": 3.940537518024052e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118101477,
-          "price": 3.871518558751011e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118102514,
-          "price": 3.857984696905781e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118103433,
-          "price": 3.829648103312132e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118104519,
-          "price": 4.152812561417548e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118105393,
-          "price": 4.224954786444757e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118106820,
-          "price": 4.2394330540341145e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118107524,
-          "price": 4.2391375318659606e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118109621,
-          "price": 4.0663968073277064e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118110485,
-          "price": 4.0766877244334535e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118111516,
-          "price": 4.1717586594676575e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118112627,
-          "price": 4.1228621058541026e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118113511,
-          "price": 4.1323731021435164e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118114533,
-          "price": 3.7518728042184744e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118115599,
-          "price": 3.671242782644961e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118116673,
-          "price": 3.706437517755799e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118117388,
-          "price": 3.7108553940214296e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118118462,
-          "price": 3.013886538533062e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118119447,
-          "price": 2.6948002891245147e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118120522,
-          "price": 2.4733079693319823e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118121521,
-          "price": 2.966093609166147e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118122501,
-          "price": 2.898261414511833e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118123640,
-          "price": 2.7459902902477503e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118124397,
-          "price": 2.7503209516468774e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118125525,
-          "price": 2.7410285821206533e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118126431,
-          "price": 2.7342121836845557e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118127476,
-          "price": 2.7738107288268037e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118128397,
-          "price": 2.77296020638116e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118129413,
-          "price": 2.792554207893994e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118130548,
-          "price": 2.8403097855643424e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118131402,
-          "price": 2.892565086122648e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118132458,
-          "price": 2.889154053981922e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118133626,
-          "price": 2.901093032881979e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118134548,
-          "price": 2.932394340988332e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118135472,
-          "price": 2.8111798585379636e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118136530,
-          "price": 2.8108723611775914e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118137584,
-          "price": 2.5865117256690985e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118138561,
-          "price": 2.594039665384157e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118139619,
-          "price": 2.2054795308402274e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750118140667,
-          "price": 2.1708919844017144e-7,
-          "source": "pool_based"
-        }
-      ],
-      "updatedAt": 1750118140948,
-      "closedAt": 1750118140948,
-      "closeReason": "Stop Loss (-54.1%)"
-    },
-    "pos_1750125470067_tfhq183p3": {
-      "id": "pos_1750125470067_tfhq183p3",
-      "tokenAddress": "B4g7Hfysomj3AoA8Lcx9FSMd8dkWYdqqV5D21EfEpump",
-      "symbol": "UNKNOWN",
-      "side": "LONG",
-      "entryPrice": 0.0003214500705227335,
-      "quantity": "31.10903035030687",
-      "investedAmount": 0.01,
-      "entryTime": 1750125470067,
-      "txHash": "2L2idjAGA7Xt2ZRzSnDkjrHDH2Mxzi4mU3L6yTMpaSabToz4MEe51KMFFLHDKve6rzuDtmvvt1HxkCYTTWmJqQeV",
-      "stopLossPrice": 0.00016072503526136676,
-      "takeProfitLevels": [
-        {
-          "targetPrice": 0.000642900141045467,
-          "sellPercentage": 50,
-          "percentage": 100,
-          "triggered": false,
-          "level": 1
-        },
-        {
-          "targetPrice": 0.001285800282090934,
-          "sellPercentage": 25,
-          "percentage": 300,
-          "triggered": false,
-          "level": 2
-        },
-        {
-          "targetPrice": 0.003214500705227335,
-          "sellPercentage": 100,
-          "percentage": 900,
-          "triggered": false,
-          "level": 3
-        }
-      ],
-      "remainingQuantity": "0",
-      "alert": {
-        "token": {
-          "address": "B4g7Hfysomj3AoA8Lcx9FSMd8dkWYdqqV5D21EfEpump",
-          "symbol": "UNKNOWN",
-          "name": "Unknown Token"
-        },
-        "twitter": {
-          "likes": 2640,
-          "url": "https://x.com/tier10k/status/1934684065875284187"
-        },
-        "confidence": "MEDIUM",
-        "migration": {
-          "pool": "pump-amm",
-          "signature": "ZK8GZmmi1zxSd7y9CXjZKfGcskWun9nS72sipycXAKVx2CGvCD5sc9dX4CYX4oms1vtASPMLig9Dk2WLqXaTkW9"
-        }
-      },
-      "paperTrade": false,
-      "priceSource": "pumpswap_service",
-      "migrationPool": null,
-      "poolAddress": null,
-      "eventType": "creation",
-      "isMigration": true,
-      "tradingMethod": "pumpswap",
-      "createdAt": 1750125470067,
-      "status": "CLOSED",
-      "totalPnL": -0.005214159,
-      "currentPrice": 0.00015386446169462768,
-      "currentValue": 0.004786574208691802,
-      "unrealizedPnL": -0.0052134257913081985,
-      "priceChange": -52.134257913081996,
-      "lastPriceUpdate": 1750129340800,
-      "lastPriceSource": "pool_based",
-      "priceHistory": [
-        {
-          "timestamp": 1750129233486,
-          "price": 0.00018906814003865903,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129235385,
-          "price": 0.00018912938642557246,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129235661,
-          "price": 0.0001891391247892912,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129236636,
-          "price": 0.00018928356558218034,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129237578,
-          "price": 0.0001894327070113409,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129238667,
-          "price": 0.00018947838185203318,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129239642,
-          "price": 0.00018948938006318477,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129240622,
-          "price": 0.00018956204210587637,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129241741,
-          "price": 0.00018957434014939733,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129242580,
-          "price": 0.00018961088772085296,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129243562,
-          "price": 0.00018989674310638702,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129244582,
-          "price": 0.00019002225154455635,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129245658,
-          "price": 0.00018988643896371242,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129246578,
-          "price": 0.00018991255708677155,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129247654,
-          "price": 0.00018999279664672425,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129248744,
-          "price": 0.0001900269358375665,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129250557,
-          "price": 0.000190048209269665,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129251607,
-          "price": 0.00019010252994060034,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129252660,
-          "price": 0.0001902173059398124,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129253705,
-          "price": 0.00019029569286129066,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129254561,
-          "price": 0.0001903093432954735,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129255624,
-          "price": 0.00019037599030412238,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129256574,
-          "price": 0.00018945662186362557,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129258025,
-          "price": 0.00018953650071176577,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129258598,
-          "price": 0.00018957035827089276,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129259648,
-          "price": 0.00018960997010275576,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129260575,
-          "price": 0.0001896267145486675,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129261589,
-          "price": 0.000189692062675457,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129262730,
-          "price": 0.00018962832643201587,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129263659,
-          "price": 0.00018963827207303034,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129264697,
-          "price": 0.00018967884895624486,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129265595,
-          "price": 0.00018972172046179266,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129266593,
-          "price": 0.00018974213869821617,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129267771,
-          "price": 0.0001897899234513953,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129268600,
-          "price": 0.00018981915965002498,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129269698,
-          "price": 0.00018986357524504704,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129271506,
-          "price": 0.00018995854244631822,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129271598,
-          "price": 0.0001899779935080378,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129272640,
-          "price": 0.00019003974207162615,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129273607,
-          "price": 0.0001900743045321738,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129274648,
-          "price": 0.00019009741192260572,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129275654,
-          "price": 0.00018970789245578056,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129277817,
-          "price": 0.0001897383821611163,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129278661,
-          "price": 0.00018977962075886272,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129279598,
-          "price": 0.0001902498780104746,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129281205,
-          "price": 0.00019034989820334745,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129282647,
-          "price": 0.000190398257111386,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129283753,
-          "price": 0.0001904299396111888,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129284679,
-          "price": 0.0001904771813843822,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129286690,
-          "price": 0.00019059781858519082,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129288753,
-          "price": 0.00019066240512250634,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129289672,
-          "price": 0.00019074906560850164,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129291661,
-          "price": 0.00019084074842047667,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129292657,
-          "price": 0.00019083150879339747,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129293648,
-          "price": 0.0001909179296875083,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129294748,
-          "price": 0.00019097437112578958,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129295851,
-          "price": 0.0001910063564425821,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129296796,
-          "price": 0.00019106987408052469,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129297609,
-          "price": 0.00019116938773533352,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129298608,
-          "price": 0.0001912522159005471,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129299690,
-          "price": 0.0001913496008023982,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129300755,
-          "price": 0.00019145998051441684,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129302258,
-          "price": 0.00019158022424442818,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129302613,
-          "price": 0.0001916264279936762,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129305690,
-          "price": 0.00019177534088876387,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129306591,
-          "price": 0.00019187852687161115,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129306757,
-          "price": 0.00019176973081381894,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129306869,
-          "price": 0.00019187852687161115,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129307611,
-          "price": 0.00019196209463573938,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129308696,
-          "price": 0.00019213252373947236,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129309680,
-          "price": 0.00019218152326416356,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129310763,
-          "price": 0.0001922788560958163,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129311703,
-          "price": 0.00019221594605987088,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129312626,
-          "price": 0.00019224943987394483,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129313655,
-          "price": 0.0001942688905257588,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129314600,
-          "price": 0.00019436818012903419,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129315627,
-          "price": 0.00019439147424895803,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129316569,
-          "price": 0.00019470282642638134,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129317731,
-          "price": 0.00019485957330645732,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129318684,
-          "price": 0.0001948775483610469,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129319613,
-          "price": 0.00019497128041401896,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129320727,
-          "price": 0.0001951812344698951,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129322729,
-          "price": 0.0001953240289254773,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129323533,
-          "price": 0.00019537075982995844,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129324692,
-          "price": 0.00019552739147556805,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129325702,
-          "price": 0.0001953013364389055,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129327769,
-          "price": 0.0001951696630366847,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129328685,
-          "price": 0.00019533249668254478,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129329635,
-          "price": 0.00019546850050104062,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129330710,
-          "price": 0.0001957019040363809,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129331696,
-          "price": 0.00019581866849584874,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129332697,
-          "price": 0.00019584478161584548,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129333802,
-          "price": 0.00018733992305887683,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129334683,
-          "price": 0.0001743266299098308,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129335707,
-          "price": 0.00017336603440173352,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129336927,
-          "price": 0.00017066524097135826,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129337705,
-          "price": 0.00016944348212160853,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129338691,
-          "price": 0.0001684132800522481,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129339777,
-          "price": 0.00015591427930319578,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129340800,
-          "price": 0.00015386446169462768,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750129341699,
-          "price": 0.00015387563562704691,
-          "source": "pool_based"
-        }
-      ],
-      "updatedAt": 1750129341309,
-      "closedAt": 1750129341309,
-      "closeReason": "Stop Loss (-51.5%)"
-    },
-    "pos_1750131238342_d72n71anz": {
-      "id": "pos_1750131238342_d72n71anz",
-      "tokenAddress": "NbcJtjVc72T4UuEHBuGrhhLqsJ8G6kr1BfFFr9Mpump",
-      "symbol": "UNKNOWN",
-      "side": "LONG",
-      "entryPrice": 4.733926683193096e-7,
-      "quantity": "21124.11253749048",
-      "investedAmount": 0.01,
-      "entryTime": 1750131238342,
-      "txHash": "3ZE6mHrN65GBx19VNj94HRwCxdGfhPhokNEifCFFJTjFzytK2WijZbz7ALm955MUyAjzYCt5EpqXPDHzoKSdZkae",
-      "stopLossPrice": 2.366963341596548e-7,
-      "takeProfitLevels": [
-        {
-          "targetPrice": 9.467853366386192e-7,
-          "sellPercentage": 50,
-          "percentage": 100,
-          "triggered": true,
-          "level": 1
-        },
-        {
-          "targetPrice": 0.0000018935706732772383,
-          "sellPercentage": 25,
-          "percentage": 300,
-          "triggered": false,
-          "level": 2
-        },
-        {
-          "targetPrice": 0.000004733926683193096,
-          "sellPercentage": 100,
-          "percentage": 900,
-          "triggered": false,
-          "level": 3
-        }
-      ],
-      "remainingQuantity": "0",
-      "alert": {
-        "token": {
-          "address": "NbcJtjVc72T4UuEHBuGrhhLqsJ8G6kr1BfFFr9Mpump",
-          "symbol": "UNKNOWN",
-          "name": "Unknown Token"
-        },
-        "twitter": {
-          "likes": 378324,
-          "url": "https://x.com/popitforpoppa/status/1934240572648407356"
-        },
-        "confidence": "MEDIUM",
-        "migration": {
-          "pool": "pump-amm",
-          "signature": "dhKDYBUU48FkuubfYcPZ7AZSP3QvARBEM5VDgM6LELkeYVwMmn5osphqXGV45Reqep6bWacLdyMFupk3Zjm8Dhi"
-        }
-      },
-      "paperTrade": false,
-      "priceSource": "pumpswap_service",
-      "migrationPool": null,
-      "poolAddress": null,
-      "eventType": "creation",
-      "isMigration": true,
-      "tradingMethod": "pumpswap",
-      "createdAt": 1750131238342,
-      "status": "CLOSED",
-      "totalPnL": 0.002536041,
-      "currentPrice": 2.3020429890606753e-7,
-      "currentValue": 0.0024314307583529335,
-      "unrealizedPnL": -0.0025685692416470667,
-      "priceChange": -51.37138483294134,
-      "lastPriceUpdate": 1750139408159,
-      "lastPriceSource": "pool_based",
-      "priceHistory": [
-        {
-          "timestamp": 1750138912042,
-          "price": 3.5040099878869004e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138913096,
-          "price": 3.512485324419611e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138917835,
-          "price": 3.4846911245719334e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138922858,
-          "price": 3.517884599507842e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138929279,
-          "price": 3.7563361118733664e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138929322,
-          "price": 3.7476287237612307e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138929502,
-          "price": 3.7563361118733664e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138929988,
-          "price": 3.7780069116046767e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138930987,
-          "price": 3.786780335457723e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138932932,
-          "price": 3.795476146621838e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138934899,
-          "price": 3.779593100169403e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138943372,
-          "price": 3.7739976351145746e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138944988,
-          "price": 3.8175071608364836e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138953027,
-          "price": 3.6992414396846975e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138982852,
-          "price": 3.694877043256601e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138983772,
-          "price": 3.693169178014828e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138984901,
-          "price": 3.697507184535782e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138991884,
-          "price": 3.653245392563216e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750138993208,
-          "price": 3.6505414075856447e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139008104,
-          "price": 3.653135313450576e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139022126,
-          "price": 3.6444871325672483e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139046099,
-          "price": 3.6430241710159443e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139064904,
-          "price": 3.6245320263826557e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139075922,
-          "price": 3.6331166796577924e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139078990,
-          "price": 3.8049074773082384e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139080821,
-          "price": 3.8401850875483824e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139086899,
-          "price": 3.8808009141768664e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139088766,
-          "price": 3.871936390338753e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139110899,
-          "price": 3.887772877456258e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139118837,
-          "price": 3.952268722364605e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139143925,
-          "price": 3.9538669147501815e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139149875,
-          "price": 4.135125276499808e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139150948,
-          "price": 4.320441642700609e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139153437,
-          "price": 4.3132084700820587e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139155366,
-          "price": 4.2231512112144967e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139159738,
-          "price": 4.22544259994143e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139164138,
-          "price": 4.213007063534682e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139167930,
-          "price": 4.1917660505853505e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139174318,
-          "price": 4.186324482715699e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139177815,
-          "price": 4.193082333251999e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139183396,
-          "price": 4.1944540158511994e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139192871,
-          "price": 4.193085073544488e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139196948,
-          "price": 4.185476178175879e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139197855,
-          "price": 4.3117183236360704e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139200401,
-          "price": 4.367530261525966e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139208923,
-          "price": 4.359194451042581e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139210334,
-          "price": 4.453873948827969e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139217854,
-          "price": 4.47114670894332e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139221962,
-          "price": 4.4587655401093664e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139222954,
-          "price": 4.446393913016392e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139226221,
-          "price": 4.3281082054939995e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139227404,
-          "price": 4.298986418176218e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139227988,
-          "price": 4.3281082054939995e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139243982,
-          "price": 4.0353483449034735e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139249187,
-          "price": 3.997437742880767e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139250051,
-          "price": 3.908520017478621e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139254234,
-          "price": 3.90001748164393e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139263058,
-          "price": 3.890007736118622e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139266051,
-          "price": 3.903361071781049e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139276914,
-          "price": 3.921183475784858e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139280074,
-          "price": 3.9195512393056084e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139282720,
-          "price": 3.9204441301556934e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139296858,
-          "price": 3.9188123557322533e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139300049,
-          "price": 3.946887759574096e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139301066,
-          "price": 3.948750661315122e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139329898,
-          "price": 3.911039902603521e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139352090,
-          "price": 3.8854890412749367e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139357106,
-          "price": 3.9121762171215987e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139361075,
-          "price": 3.916587165400249e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139362123,
-          "price": 3.931676469193934e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139369433,
-          "price": 4.201741703248694e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139371869,
-          "price": 3.514222857914685e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139372966,
-          "price": 3.4802221490847746e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139374931,
-          "price": 2.863380891858982e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139376954,
-          "price": 2.74003221321816e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139377937,
-          "price": 2.82315863286116e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139378906,
-          "price": 2.739404359680589e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139380007,
-          "price": 2.763834804624393e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139381212,
-          "price": 2.5491697339087647e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139381951,
-          "price": 2.4597467261828316e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139382823,
-          "price": 2.476317438101266e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139383841,
-          "price": 2.494751785905122e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139384944,
-          "price": 2.5393551190992496e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139385988,
-          "price": 2.6191211292466837e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139386887,
-          "price": 2.5716904877417425e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139388244,
-          "price": 2.577275327540967e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139389076,
-          "price": 2.5772541504803355e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139389948,
-          "price": 2.579611295216816e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139391962,
-          "price": 2.5787713217514995e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139393858,
-          "price": 2.5786124023575707e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139394963,
-          "price": 2.56815939717245e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139396041,
-          "price": 2.5539868538630686e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139397051,
-          "price": 2.542268615494261e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139398161,
-          "price": 2.687915483475353e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139399935,
-          "price": 2.6353927517537156e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139401033,
-          "price": 2.527562899561077e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139402185,
-          "price": 2.507431075880372e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139404095,
-          "price": 2.5145730560127425e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139407404,
-          "price": 2.306114960708982e-7,
-          "source": "pool_based"
-        },
-        {
-          "timestamp": 1750139408159,
-          "price": 2.3020429890606753e-7,
-          "source": "pool_based"
-        }
-      ],
-      "updatedAt": 1750139408382,
-      "closedAt": 1750139408382,
-      "closeReason": "Stop Loss (-51.3%)"
-    }
-  },
-  "lastSaved": "2025-06-17T09:04:32.851Z",
-  "stats": {
-    "stopLossTriggered": 4,
-    "takeProfitTriggered": 1,
-    "priceUpdates": 11139,
-    "poolBasedPriceUpdates": 34057,
-    "fallbackPriceUpdates": 239,
+  "sessionStats": {
+    "stopLossTriggered": 1,
+    "takeProfitTriggered": 0,
+    "priceUpdates": 273,
+    "poolBasedPriceUpdates": 280,
+    "fallbackPriceUpdates": 0,
     "priceUpdateFailures": 0,
-    "liveSellsExecuted": 5,
+    "liveSellsExecuted": 1,
     "paperSellsExecuted": 0,
-    "stopLossExecutions": 4,
-    "takeProfitExecutions": 1,
-    "totalLivePnL": -0.013176516
+    "stopLossExecutions": 1,
+    "takeProfitExecutions": 0,
+    "sessionPnL": -0.005729059
   },
   "priceUpdateStats": {
     "poolBased": {
-      "attempts": 42,
-      "successes": 43,
-      "totalTime": 23310
+      "attempts": 0,
+      "successes": 1,
+      "totalTime": 506
     },
     "fallback": {
       "attempts": 0,
       "successes": 0,
       "totalTime": 0
     },
-    "lastUpdate": 1750111790093
-  }
+    "lastUpdate": 1750152561858
+  },
+  "lastSaved": "2025-06-17T09:47:22.709Z"
 }

@@ -1,0 +1,31 @@
+{
+  "trades": [
+    {
+      "id": "pos_1750153362932_u54ekoxds",
+      "tokenAddress": "HMPMa68Zzbx13g3KomQJiH9k9ito9eiUKi4sEEU2pump",
+      "symbol": "UNKNOWN",
+      "entryTime": 1750153362932,
+      "exitTime": 1750153495092,
+      "entryPrice": 4.803676755558831e-7,
+      "exitPrice": 2.0517667117058284e-7,
+      "quantity": "20817.38740731871",
+      "investedAmount": 0.01,
+      "pnl": -0.005729059,
+      "pnlPercentage": -57.290589999999995,
+      "exitReason": "Stop Loss (-57.3%)",
+      "duration": 132160,
+      "tradingMode": "live",
+      "entryTxHash": "4Z6t9Q7dpRzYCRDs4SgU1Jougobjoy11Cy9kYuSzDnRVpmnR2pBJuu92ZFrR9Zh7T4QrkxvnKLyqNBYf1XwjZ1mm",
+      "exitTxHash": "59FwBZSM2eca6W6r4tvsoNe78bwjLipFyBhAGTC5gh52m8EfiqPod1XdayzXcRRwVV4VuQXtJh4UY4oLSaRWc9NR",
+      "eventType": "creation",
+      "twitterLikes": 7,
+      "priceSource": "pool_based"
+    }
+  ],
+  "summary": {
+    "totalTrades": 1,
+    "totalPnL": -0.005729059,
+    "winRate": 0,
+    "lastUpdated": "2025-06-17T09:44:55.092Z"
+  }
+}

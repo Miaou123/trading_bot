@@ -1,4 +1,4 @@
-// src/bot/positionManager.js - ENHANCED: Debug logging for price monitoring issues
+// src/bot/positionManager.js - UPDATED: Clean separation of active positions and trade history
 const EventEmitter = require('events');
 const fs = require('fs').promises;
 const path = require('path');
@@ -11,15 +11,17 @@ class PositionManager extends EventEmitter {
         this.config = {
             tradingMode: config.tradingMode || 'paper',
             positionsFile: config.positionsFile || './positions.json',
+            tradesHistoryFile: config.tradesHistoryFile || './trades_history.json',
             maxPositions: config.maxPositions || 20,
-            // Enhanced update intervals for live trading
-            fastUpdateInterval: config.fastUpdateInterval || 1000,  // 1s for live monitoring
-            slowUpdateInterval: config.slowUpdateInterval || 60000, // 1min for fallback
+            fastUpdateInterval: config.fastUpdateInterval || 1000,
+            slowUpdateInterval: config.slowUpdateInterval || 60000,
             ...config
         };
 
+        // Only active positions - NO closed positions here
         this.positions = new Map();
-        this.closedPositions = new Map();
+        
+        // Trade history is handled separately
         this.tradingBot = null;
         
         // Track price source performance
@@ -29,19 +31,19 @@ class PositionManager extends EventEmitter {
             lastUpdate: Date.now()
         };
         
-        this.stats = {
+        // Session stats (reset when bot restarts)
+        this.sessionStats = {
             stopLossTriggered: 0,
             takeProfitTriggered: 0,
             priceUpdates: 0,
             poolBasedPriceUpdates: 0,
             fallbackPriceUpdates: 0,
             priceUpdateFailures: 0,
-            // Live trading stats
             liveSellsExecuted: 0,
             paperSellsExecuted: 0,
             stopLossExecutions: 0,
             takeProfitExecutions: 0,
-            totalLivePnL: 0
+            sessionPnL: 0
         };
         
         this.loadPositions();
@@ -77,13 +79,13 @@ class PositionManager extends EventEmitter {
         logger.info(`   🪐 Fallback: ${this.config.slowUpdateInterval}ms intervals`);
     }
 
-    // 🔥 NEW: Enhanced price stats logging with position monitoring
+    // Enhanced price stats logging with position monitoring
     startPriceStatsLogging() {
         setInterval(() => {
             const poolBased = this.priceUpdateStats.poolBased;
             const fallback = this.priceUpdateStats.fallback;
             
-            // 🔥 NEW: Show current positions and prices in one compact line
+            // Show current positions and prices in one compact line
             if (this.positions.size > 0) {
                 const positionSummaries = Array.from(this.positions.values()).map(pos => {
                     const currentPrice = pos.currentPrice || pos.entryPrice;
@@ -92,11 +94,10 @@ class PositionManager extends EventEmitter {
                     const source = pos.lastPriceSource === 'pool_based' ? 'P' : 
                                   pos.lastPriceSource === 'fallback' ? 'F' : 'U';
                     
-                    // Compact format: TOKEN(8chars) PRICE CHANGE% SOURCE
                     return `${pos.symbol || pos.tokenAddress.slice(0,8)}:${currentPrice.toFixed(8)}${changeIcon}${priceChange.toFixed(1)}%[${source}]`;
                 });
                 
-                logger.info(`📊 POSITIONS: ${positionSummaries.join(' | ')}`);
+                logger.info(`📊 ACTIVE POSITIONS: ${positionSummaries.join(' | ')}`);
             }
             
             // Show detailed stats if there were price updates
@@ -110,14 +111,13 @@ class PositionManager extends EventEmitter {
                 logger.info(`   🔧 Pool-based: ${poolBased.successes}/${poolBased.attempts} (${poolSuccess}%) avg: ${poolAvg}ms`);
                 logger.info(`   🪐 Fallback: ${fallback.successes}/${fallback.attempts} (${fallbackSuccess}%) avg: ${fallbackAvg}ms`);
                 
-                // Show live trading stats if any
-                if (this.stats.liveSellsExecuted > 0 || this.stats.paperSellsExecuted > 0) {
-                    logger.info('💰 TRADING EXECUTION STATS:');
-                    logger.info(`   🚀 Live sells: ${this.stats.liveSellsExecuted}`);
-                    logger.info(`   📝 Paper sells: ${this.stats.paperSellsExecuted}`);
-                    logger.info(`   🛑 Stop losses: ${this.stats.stopLossExecutions}`);
-                    logger.info(`   🎯 Take profits: ${this.stats.takeProfitExecutions}`);
-                    logger.info(`   💎 Total Live PnL: ${this.stats.totalLivePnL.toFixed(6)} SOL`);
+                if (this.sessionStats.liveSellsExecuted > 0 || this.sessionStats.paperSellsExecuted > 0) {
+                    logger.info('💰 SESSION TRADING STATS:');
+                    logger.info(`   🚀 Live sells: ${this.sessionStats.liveSellsExecuted}`);
+                    logger.info(`   📝 Paper sells: ${this.sessionStats.paperSellsExecuted}`);
+                    logger.info(`   🛑 Stop losses: ${this.sessionStats.stopLossExecutions}`);
+                    logger.info(`   🎯 Take profits: ${this.sessionStats.takeProfitExecutions}`);
+                    logger.info(`   💎 Session PnL: ${this.sessionStats.sessionPnL.toFixed(6)} SOL`);
                 }
                 
                 // Reset stats
@@ -132,19 +132,14 @@ class PositionManager extends EventEmitter {
         for (const position of this.positions.values()) {
             try {
                 logger.debug(`🔧 Fast update for ${position.symbol} (${position.tokenAddress.slice(0,8)})`);
-                logger.debug(`   Stored pool: ${position.poolAddress || 'NONE'}`);
-                logger.debug(`   Migration pool: ${position.migrationPool || 'NONE'}`);
-                logger.debug(`   Last price: ${position.currentPrice || 'NONE'}`);
-                logger.debug(`   Last source: ${position.lastPriceSource || 'NONE'}`);
                 
-                // Use the working getTokenPrice method from trading bot
                 const currentPrice = await this.getPositionPricePoolBased(position);
                 
                 if (currentPrice && currentPrice !== position.currentPrice) {
                     logger.debug(`✅ Price update successful for ${position.symbol}: ${position.currentPrice} → ${currentPrice}`);
                     await this.updatePositionPrice(position, currentPrice, 'pool_based');
                     
-                    // 🚀 ENHANCED: Check triggers after price update with live execution
+                    // Check triggers after price update with live execution
                     await this.checkStopLossWithLiveExecution(position);
                     await this.checkTakeProfitsWithLiveExecution(position);
                 } else if (currentPrice === position.currentPrice) {
@@ -155,7 +150,6 @@ class PositionManager extends EventEmitter {
                 
             } catch (error) {
                 logger.debug(`❌ Fast price update failed for ${position.symbol}: ${error.message}`);
-                logger.debug(`   Error stack: ${error.stack?.split('\n')[0]}`);
             }
         }
     }
@@ -164,7 +158,6 @@ class PositionManager extends EventEmitter {
     async updateAllPositionsSlow() {
         for (const position of this.positions.values()) {
             try {
-                // Only use fallback if pool-based method hasn't updated recently
                 const timeSinceLastUpdate = Date.now() - (position.lastPriceUpdate || 0);
                 
                 if (timeSinceLastUpdate > 30000) { // If no update in 30 seconds
@@ -176,13 +169,8 @@ class PositionManager extends EventEmitter {
                         logger.debug(`✅ Fallback price update successful for ${position.symbol}: ${position.currentPrice} → ${currentPrice}`);
                         await this.updatePositionPrice(position, currentPrice, 'fallback');
                         
-                        // Check triggers with fallback price too
                         await this.checkStopLossWithLiveExecution(position);
                         await this.checkTakeProfitsWithLiveExecution(position);
-                    } else if (currentPrice === position.currentPrice) {
-                        logger.debug(`📊 Fallback price unchanged for ${position.symbol}: ${currentPrice}`);
-                    } else {
-                        logger.debug(`❌ No fallback price returned for ${position.symbol}`);
                     }
                 } else {
                     logger.debug(`⏭️ Skipping fallback for ${position.symbol} (recent update ${Math.round(timeSinceLastUpdate/1000)}s ago)`);
@@ -190,7 +178,6 @@ class PositionManager extends EventEmitter {
                 
             } catch (error) {
                 logger.debug(`❌ Fallback price update failed for ${position.symbol}: ${error.message}`);
-                logger.debug(`   Error stack: ${error.stack?.split('\n')[0]}`);
             }
         }
     }
@@ -204,44 +191,30 @@ class PositionManager extends EventEmitter {
             const tokenAddress = position.tokenAddress;
             const poolAddress = position.poolAddress || position.migrationPool;
             
-            logger.debug(`🔧 Pool-based price fetch for ${position.symbol}:`);
-            logger.debug(`   Token: ${tokenAddress}`);
-            logger.debug(`   Pool: ${poolAddress || 'WILL_DERIVE'}`);
-            logger.debug(`   TradingBot available: ${!!this.tradingBot}`);
-            
             if (!this.tradingBot) {
                 throw new Error('TradingBot not available');
             }
             
-            // 🔥 DEBUG: Log the exact call being made
-            logger.debug(`   Calling getTokenPrice(${tokenAddress}, true, ${poolAddress})`);
-            
-            // Use the existing getTokenPrice method that actually works!
             const priceInfo = await this.tradingBot.getTokenPrice(
                 tokenAddress, 
-                true, // Force refresh
-                poolAddress // Use known pool if available
+                true,
+                poolAddress
             );
-            
-            logger.debug(`   Raw response type: ${typeof priceInfo}`);
-            logger.debug(`   Raw response: ${JSON.stringify(priceInfo)}`);
             
             let price;
             if (typeof priceInfo === 'object' && priceInfo.price) {
                 price = priceInfo.price;
-                logger.debug(`   Extracted price from object: ${price}`);
             } else if (typeof priceInfo === 'number') {
                 price = priceInfo;
-                logger.debug(`   Using number price: ${price}`);
             } else {
-                throw new Error(`Invalid price format returned: ${typeof priceInfo} - ${JSON.stringify(priceInfo)}`);
+                throw new Error(`Invalid price format returned: ${typeof priceInfo}`);
             }
             
             if (price && price > 0) {
                 const duration = Date.now() - startTime;
                 this.priceUpdateStats.poolBased.successes++;
                 this.priceUpdateStats.poolBased.totalTime += duration;
-                this.stats.poolBasedPriceUpdates++;
+                this.sessionStats.poolBasedPriceUpdates++;
                 
                 logger.debug(`✅ Pool-based price for ${position.symbol}: ${price.toFixed(12)} SOL (${duration}ms)`);
                 return price;
@@ -252,7 +225,6 @@ class PositionManager extends EventEmitter {
         } catch (error) {
             const duration = Date.now() - startTime;
             logger.debug(`❌ Pool-based price failed for ${position.symbol} (${duration}ms): ${error.message}`);
-            logger.debug(`   Full error: ${error.stack?.split('\n').slice(0,3).join(' | ')}`);
             return null;
         }
     }
@@ -263,30 +235,19 @@ class PositionManager extends EventEmitter {
         this.priceUpdateStats.fallback.attempts++;
         
         try {
-            logger.debug(`🪐 Fallback price fetch for ${position.symbol}:`);
-            
-            // For fallback, we can try to derive the pool if we don't have it
             if (!position.poolAddress && this.tradingBot.derivePoolAddress) {
-                logger.debug(`   No pool address stored, attempting derivation...`);
                 const derivedPool = this.tradingBot.derivePoolAddress(position.tokenAddress);
                 if (derivedPool) {
                     position.poolAddress = derivedPool;
                     logger.debug(`   📍 Derived pool for ${position.symbol}: ${derivedPool}`);
-                } else {
-                    logger.debug(`   ❌ Pool derivation failed for ${position.symbol}`);
                 }
             }
             
-            logger.debug(`   Using pool: ${position.poolAddress || 'NONE'}`);
-            
-            // Try the same method but with derived pool
             const priceInfo = await this.tradingBot.getTokenPrice(
                 position.tokenAddress, 
                 true,
                 position.poolAddress
             );
-            
-            logger.debug(`   Fallback raw response: ${JSON.stringify(priceInfo)}`);
             
             let price;
             if (typeof priceInfo === 'object' && priceInfo.price) {
@@ -301,7 +262,7 @@ class PositionManager extends EventEmitter {
                 const duration = Date.now() - startTime;
                 this.priceUpdateStats.fallback.successes++;
                 this.priceUpdateStats.fallback.totalTime += duration;
-                this.stats.fallbackPriceUpdates++;
+                this.sessionStats.fallbackPriceUpdates++;
                 
                 logger.debug(`✅ Fallback price for ${position.symbol}: ${price.toFixed(12)} SOL (${duration}ms)`);
                 return price;
@@ -318,11 +279,6 @@ class PositionManager extends EventEmitter {
 
     // Update position price with source tracking
     async updatePositionPrice(position, newPrice, source = 'unknown') {
-        logger.debug(`📊 Updating position price for ${position.symbol}:`);
-        logger.debug(`   Old price: ${position.currentPrice || 'NONE'}`);
-        logger.debug(`   New price: ${newPrice}`);
-        logger.debug(`   Source: ${source}`);
-        
         const remainingTokens = parseFloat(position.remainingQuantity);
         const currentValue = remainingTokens * newPrice;
         const investedValue = (remainingTokens / parseFloat(position.quantity)) * position.investedAmount;
@@ -353,19 +309,12 @@ class PositionManager extends EventEmitter {
         position.lastPriceSource = source;
 
         this.positions.set(position.id, position);
-        this.stats.priceUpdates++;
+        this.sessionStats.priceUpdates++;
         
-        logger.debug(`✅ Position price updated for ${position.symbol}:`);
-        logger.debug(`   Current value: ${currentValue.toFixed(6)} SOL`);
-        logger.debug(`   Unrealized PnL: ${unrealizedPnL.toFixed(6)} SOL`);
-        logger.debug(`   Price change: ${priceChange.toFixed(2)}%`);
-        
-        // 🔥 REMOVED: Individual price update logging (now handled in summary)
-        // This reduces console spam and keeps individual updates for debugging only
         logger.debug(`${position.symbol}: ${newPrice.toFixed(8)} SOL (${priceChange > 0 ? '+' : ''}${priceChange.toFixed(2)}%) via ${source}`);
     }
 
-    // 🚀 ENHANCED: Check stop loss with LIVE execution
+    // Check stop loss with LIVE execution
     async checkStopLossWithLiveExecution(position) {
         if (!position.stopLossPrice || !position.currentPrice) return;
         
@@ -376,31 +325,25 @@ class PositionManager extends EventEmitter {
             
             try {
                 if (this.tradingBot.config.tradingMode === 'live') {
-                    // 🚀 EXECUTE LIVE PUMPSWAP SELL
-                    logger.info(`🚀 Executing LIVE stop loss sell for ${position.symbol}...`);
-                    
                     const sellResult = await this.tradingBot.executePumpSwapSell(
                         position, 
-                        100, // Sell 100% on stop loss
-                        `Stop Loss (-${Math.abs(lossPercent).toFixed(1)}%)`
+                        100,
+                        `Stop Loss (${lossPercent.toFixed(1)}%)`
                     );
                     
                     if (sellResult.success) {
                         logger.info(`✅ LIVE STOP LOSS EXECUTED: ${sellResult.solReceived.toFixed(6)} SOL received`);
-                        logger.info(`📊 PnL: ${sellResult.pnl > 0 ? '+' : ''}${sellResult.pnl.toFixed(6)} SOL (${sellResult.pnlPercentage.toFixed(2)}%)`);
-                        
-                        this.stats.liveSellsExecuted++;
-                        this.stats.stopLossExecutions++;
-                        this.stats.totalLivePnL += sellResult.pnl;
+                        this.sessionStats.liveSellsExecuted++;
+                        this.sessionStats.stopLossExecutions++;
+                        this.sessionStats.sessionPnL += sellResult.pnl;
                     }
                 } else {
-                    // Paper trading - simulate the sell
-                    await this.simulatePartialSell(position, 100, `Stop Loss (-${Math.abs(lossPercent).toFixed(1)}%)`);
-                    this.stats.paperSellsExecuted++;
-                    this.stats.stopLossExecutions++;
+                    await this.simulatePartialSell(position, 100, `Stop Loss (${lossPercent.toFixed(1)}%)`);
+                    this.sessionStats.paperSellsExecuted++;
+                    this.sessionStats.stopLossExecutions++;
                 }
                 
-                this.stats.stopLossTriggered++;
+                this.sessionStats.stopLossTriggered++;
                 
                 this.emit('stopLossTriggered', {
                     position: position,
@@ -412,14 +355,13 @@ class PositionManager extends EventEmitter {
                 
             } catch (error) {
                 logger.error(`❌ Stop loss execution failed for ${position.symbol}: ${error.message}`);
-                // Mark position for manual intervention
                 position.status = 'STOP_LOSS_FAILED';
                 position.errorMessage = error.message;
             }
         }
     }
 
-    // 🚀 ENHANCED: Check take profits with LIVE execution
+    // Check take profits with LIVE execution
     async checkTakeProfitsWithLiveExecution(position) {
         if (!position.takeProfitLevels || !position.currentPrice) return;
         
@@ -435,9 +377,6 @@ class PositionManager extends EventEmitter {
                 
                 try {
                     if (this.tradingBot.config.tradingMode === 'live') {
-                        // 🚀 EXECUTE LIVE PUMPSWAP SELL
-                        logger.info(`🚀 Executing LIVE take profit ${tp.level} sell for ${position.symbol} (${tp.sellPercentage}%)...`);
-                        
                         const sellResult = await this.tradingBot.executePumpSwapSell(
                             position, 
                             tp.sellPercentage,
@@ -446,20 +385,17 @@ class PositionManager extends EventEmitter {
                         
                         if (sellResult.success) {
                             logger.info(`✅ LIVE TAKE PROFIT ${tp.level} EXECUTED: ${sellResult.solReceived.toFixed(6)} SOL received`);
-                            logger.info(`📊 PnL: +${sellResult.pnl.toFixed(6)} SOL (+${sellResult.pnlPercentage.toFixed(2)}%)`);
-                            
-                            this.stats.liveSellsExecuted++;
-                            this.stats.takeProfitExecutions++;
-                            this.stats.totalLivePnL += sellResult.pnl;
+                            this.sessionStats.liveSellsExecuted++;
+                            this.sessionStats.takeProfitExecutions++;
+                            this.sessionStats.sessionPnL += sellResult.pnl;
                         }
                     } else {
-                        // Paper trading - simulate the sell
                         await this.simulatePartialSell(position, tp.sellPercentage, `Take Profit ${tp.level} (+${gainPercent.toFixed(1)}%)`);
-                        this.stats.paperSellsExecuted++;
-                        this.stats.takeProfitExecutions++;
+                        this.sessionStats.paperSellsExecuted++;
+                        this.sessionStats.takeProfitExecutions++;
                     }
                     
-                    this.stats.takeProfitTriggered++;
+                    this.sessionStats.takeProfitTriggered++;
                     
                     this.emit('takeProfitTriggered', {
                         position: position,
@@ -473,7 +409,7 @@ class PositionManager extends EventEmitter {
                     
                 } catch (error) {
                     logger.error(`❌ Take profit ${tp.level} execution failed for ${position.symbol}: ${error.message}`);
-                    tp.triggered = false; // Reset so it can try again
+                    tp.triggered = false;
                     tp.status = 'EXECUTION_FAILED';
                     tp.errorMessage = error.message;
                 }
@@ -493,7 +429,6 @@ class PositionManager extends EventEmitter {
             ...position,
             createdAt: Date.now(),
             status: 'ACTIVE',
-            totalPnL: 0,
             currentPrice: position.entryPrice,
             currentValue: position.investedAmount,
             unrealizedPnL: 0,
@@ -510,7 +445,6 @@ class PositionManager extends EventEmitter {
         this.positions.set(position.id, enhancedPosition);
         await this.savePositions();
         
-        // 🔥 DEBUG: Log position creation details
         logger.info(`📈 Position created: ${position.symbol}`);
         logger.debug(`   Position details: ${JSON.stringify({
             tokenAddress: position.tokenAddress,
@@ -556,6 +490,117 @@ class PositionManager extends EventEmitter {
         );
     }
 
+    // 🔥 NEW: Update position after sell - handles moving to trade history
+    async updatePositionAfterSell(positionId, sellQuantity, soldValue, pnl, txHash, reason = 'Manual') {
+        const position = this.positions.get(positionId);
+        if (!position) throw new Error(`Position ${positionId} not found`);
+
+        const newRemainingQuantity = parseFloat(position.remainingQuantity) - sellQuantity;
+
+        const updatedPosition = {
+            ...position,
+            remainingQuantity: newRemainingQuantity.toString(),
+            updatedAt: Date.now()
+        };
+
+        // If position is fully closed, move to trade history
+        if (newRemainingQuantity <= 0.001) {
+            updatedPosition.status = 'CLOSED';
+            updatedPosition.closedAt = Date.now();
+            updatedPosition.closeReason = reason;
+            updatedPosition.finalPnL = pnl;
+            updatedPosition.exitTxHash = txHash;
+
+            // 🔥 MOVE TO TRADE HISTORY instead of keeping in positions
+            await this.movePositionToHistory(updatedPosition);
+            
+            // Remove from active positions
+            this.positions.delete(positionId);
+
+            const priceSourceInfo = position.lastPriceSource ? ` (${position.lastPriceSource})` : '';
+            const tradingModeInfo = position.paperTrade ? ' [PAPER]' : ' [LIVE]';
+            
+            logger.info(`📉 CLOSED: ${position.symbol} - PnL: ${pnl.toFixed(4)} SOL${priceSourceInfo}${tradingModeInfo}`);
+            this.emit('positionClosed', updatedPosition);
+        } else {
+            // Partial sell - keep in active positions
+            this.positions.set(positionId, updatedPosition);
+            logger.info(`📊 SOLD: ${sellQuantity.toFixed(6)} ${position.symbol} - ${newRemainingQuantity.toFixed(2)} remaining`);
+            this.emit('positionUpdated', updatedPosition);
+        }
+
+        await this.savePositions();
+        return updatedPosition;
+    }
+
+    // 🔥 NEW: Move completed position to trade history
+    async movePositionToHistory(closedPosition) {
+        try {
+            // Create simplified trade record
+            const trade = {
+                id: closedPosition.id,
+                tokenAddress: closedPosition.tokenAddress,
+                symbol: closedPosition.symbol,
+                entryTime: closedPosition.entryTime,
+                exitTime: closedPosition.closedAt,
+                entryPrice: closedPosition.entryPrice,
+                exitPrice: closedPosition.currentPrice || closedPosition.entryPrice,
+                quantity: closedPosition.quantity,
+                investedAmount: closedPosition.investedAmount,
+                pnl: closedPosition.finalPnL,
+                pnlPercentage: ((closedPosition.finalPnL / closedPosition.investedAmount) * 100),
+                exitReason: closedPosition.closeReason,
+                duration: closedPosition.closedAt - closedPosition.entryTime,
+                tradingMode: closedPosition.paperTrade ? 'paper' : 'live',
+                entryTxHash: closedPosition.txHash,
+                exitTxHash: closedPosition.exitTxHash,
+                eventType: closedPosition.eventType,
+                twitterLikes: closedPosition.alert?.twitter?.likes,
+                priceSource: closedPosition.lastPriceSource
+            };
+
+            // Load existing trade history
+            let tradesHistory;
+            try {
+                const historyPath = path.resolve(this.config.tradesHistoryFile);
+                const data = await fs.readFile(historyPath, 'utf8');
+                tradesHistory = JSON.parse(data);
+            } catch (error) {
+                // Create new history file if it doesn't exist
+                tradesHistory = {
+                    trades: [],
+                    summary: {
+                        totalTrades: 0,
+                        totalPnL: 0,
+                        winRate: 0,
+                        lastUpdated: new Date().toISOString()
+                    }
+                };
+            }
+
+            // Add trade to history
+            tradesHistory.trades.push(trade);
+            
+            // Update summary
+            tradesHistory.summary.totalTrades = tradesHistory.trades.length;
+            tradesHistory.summary.totalPnL = tradesHistory.trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+            const profitableTrades = tradesHistory.trades.filter(t => (t.pnl || 0) > 0).length;
+            tradesHistory.summary.winRate = tradesHistory.trades.length > 0 ? 
+                (profitableTrades / tradesHistory.trades.length * 100) : 0;
+            tradesHistory.summary.lastUpdated = new Date().toISOString();
+
+            // Save trade history
+            const historyPath = path.resolve(this.config.tradesHistoryFile);
+            await fs.writeFile(historyPath, JSON.stringify(tradesHistory, null, 2));
+            
+            logger.info(`💾 Trade moved to history: ${closedPosition.symbol} (${tradesHistory.trades.length} total trades)`);
+            
+        } catch (error) {
+            logger.error('❌ Failed to move position to trade history:', error.message);
+            // Don't throw - we don't want to break position closing if history fails
+        }
+    }
+
     // Close position completely
     async closePosition(positionId, reason = 'Manual Close') {
         const position = this.positions.get(positionId);
@@ -567,17 +612,15 @@ class PositionManager extends EventEmitter {
         const finalPnL = currentValue - originalInvestment;
         
         if (this.tradingBot.config.tradingMode === 'live') {
-            // Execute live sell
             try {
                 const sellResult = await this.tradingBot.executePumpSwapSell(position, 100, reason);
                 if (sellResult.success) {
                     logger.info(`✅ LIVE POSITION CLOSED: ${position.symbol} - ${sellResult.solReceived.toFixed(6)} SOL received`);
-                    this.stats.liveSellsExecuted++;
-                    this.stats.totalLivePnL += sellResult.pnl;
+                    this.sessionStats.liveSellsExecuted++;
+                    this.sessionStats.sessionPnL += sellResult.pnl;
                 }
             } catch (error) {
                 logger.error(`❌ Live position close failed for ${position.symbol}: ${error.message}`);
-                // Fall back to paper close
                 await this.updatePositionAfterSell(
                     positionId,
                     remainingQuantity,
@@ -588,7 +631,6 @@ class PositionManager extends EventEmitter {
                 );
             }
         } else {
-            // Paper close
             await this.updatePositionAfterSell(
                 positionId,
                 remainingQuantity,
@@ -600,53 +642,9 @@ class PositionManager extends EventEmitter {
         }
     }
 
-    // Update position after sell (handles both live and paper)
-    async updatePositionAfterSell(positionId, sellQuantity, soldValue, pnl, txHash, reason = 'Manual') {
-        const position = this.positions.get(positionId);
-        if (!position) throw new Error(`Position ${positionId} not found`);
-
-        const newRemainingQuantity = parseFloat(position.remainingQuantity) - sellQuantity;
-
-        const updatedPosition = {
-            ...position,
-            remainingQuantity: newRemainingQuantity.toString(),
-            totalPnL: position.totalPnL + pnl,
-            updatedAt: Date.now()
-        };
-
-        // Close position if fully sold
-        if (newRemainingQuantity <= 0.001) {
-            updatedPosition.status = 'CLOSED';
-            updatedPosition.closedAt = Date.now();
-            updatedPosition.closeReason = reason;
-
-            this.closedPositions.set(positionId, updatedPosition);
-            this.positions.delete(positionId);
-
-            const priceSourceInfo = position.lastPriceSource ? ` (${position.lastPriceSource})` : '';
-            const tradingModeInfo = position.paperTrade ? ' [PAPER]' : ' [LIVE]';
-            
-            logger.info(`📉 CLOSED: ${position.symbol} - PnL: ${updatedPosition.totalPnL.toFixed(4)} SOL${priceSourceInfo}${tradingModeInfo}`);
-            this.emit('positionClosed', updatedPosition);
-        } else {
-            this.positions.set(positionId, updatedPosition);
-            logger.info(`📊 SOLD: ${sellQuantity.toFixed(6)} ${position.symbol} - ${newRemainingQuantity.toFixed(2)} remaining`);
-            this.emit('positionUpdated', updatedPosition);
-        }
-
-        await this.savePositions();
-        return updatedPosition;
-    }
-
     // Get enhanced performance summary
     getPerformanceStats() {
         const activePositions = Array.from(this.positions.values());
-        const closedPositions = Array.from(this.closedPositions.values());
-        const allPositions = [...activePositions, ...closedPositions];
-        
-        const totalTrades = allPositions.length;
-        const profitableTrades = allPositions.filter(pos => (pos.totalPnL || 0) > 0).length;
-        const winRate = totalTrades > 0 ? (profitableTrades / totalTrades * 100).toFixed(1) : '0';
         
         const totalInvested = activePositions.reduce((sum, pos) => {
             const ratio = parseFloat(pos.remainingQuantity) / parseFloat(pos.quantity);
@@ -654,60 +652,45 @@ class PositionManager extends EventEmitter {
         }, 0);
         
         const totalUnrealizedPnL = activePositions.reduce((sum, pos) => sum + (pos.unrealizedPnL || 0), 0);
-        const totalRealizedPnL = [...activePositions, ...closedPositions].reduce((sum, pos) => sum + pos.totalPnL, 0);
 
         // Calculate price source distribution
         const poolBasedPositions = activePositions.filter(pos => pos.lastPriceSource === 'pool_based').length;
         const fallbackPositions = activePositions.filter(pos => pos.lastPriceSource === 'fallback').length;
 
         return {
-            totalPositions: totalTrades,
             activePositions: activePositions.length,
-            closedPositions: closedPositions.length,
-            winRate: winRate + '%',
             totalInvested: totalInvested.toFixed(4) + ' SOL',
             totalUnrealizedPnL: totalUnrealizedPnL.toFixed(4) + ' SOL',
-            totalRealizedPnL: totalRealizedPnL.toFixed(4) + ' SOL',
             
-            // Enhanced stats
-            priceUpdates: {
-                total: this.stats.priceUpdates,
-                poolBased: this.stats.poolBasedPriceUpdates,
-                fallback: this.stats.fallbackPriceUpdates,
-                failures: this.stats.priceUpdateFailures
+            // Session stats only
+            sessionStats: {
+                priceUpdates: this.sessionStats.priceUpdates,
+                poolBasedUpdates: this.sessionStats.poolBasedPriceUpdates,
+                fallbackUpdates: this.sessionStats.fallbackPriceUpdates,
+                failures: this.sessionStats.priceUpdateFailures,
+                stopLossTriggered: this.sessionStats.stopLossTriggered,
+                takeProfitTriggered: this.sessionStats.takeProfitTriggered,
+                liveSells: this.sessionStats.liveSellsExecuted,
+                paperSells: this.sessionStats.paperSellsExecuted,
+                sessionPnL: this.sessionStats.sessionPnL.toFixed(6) + ' SOL'
             },
             
             currentPriceSources: {
                 poolBased: poolBasedPositions,
                 fallback: fallbackPositions,
                 unknown: activePositions.length - poolBasedPositions - fallbackPositions
-            },
-            
-            triggers: {
-                stopLossTriggered: this.stats.stopLossTriggered,
-                takeProfitTriggered: this.stats.takeProfitTriggered
-            },
-            
-            // 🚀 NEW: Live trading execution stats
-            liveTrading: {
-                liveSellsExecuted: this.stats.liveSellsExecuted,
-                paperSellsExecuted: this.stats.paperSellsExecuted,
-                stopLossExecutions: this.stats.stopLossExecutions,
-                takeProfitExecutions: this.stats.takeProfitExecutions,
-                totalLivePnL: this.stats.totalLivePnL.toFixed(6) + ' SOL'
             }
         };
     }
 
-    // Save/load positions
+    // 🔥 UPDATED: Save only active positions (no closed positions)
     async savePositions() {
         try {
             const data = {
                 active: Object.fromEntries(this.positions),
-                closed: Object.fromEntries(this.closedPositions),
-                lastSaved: new Date().toISOString(),
-                stats: this.stats,
-                priceUpdateStats: this.priceUpdateStats
+                sessionStats: this.sessionStats,
+                priceUpdateStats: this.priceUpdateStats,
+                lastSaved: new Date().toISOString()
             };
             
             await fs.writeFile(path.resolve(this.config.positionsFile), JSON.stringify(data, null, 2));
@@ -716,6 +699,7 @@ class PositionManager extends EventEmitter {
         }
     }
 
+    // 🔥 UPDATED: Load only active positions
     async loadPositions() {
         try {
             const data = await fs.readFile(path.resolve(this.config.positionsFile), 'utf8');
@@ -727,17 +711,11 @@ class PositionManager extends EventEmitter {
                 }
             }
             
-            if (savedData.closed) {
-                for (const [id, position] of Object.entries(savedData.closed)) {
-                    this.closedPositions.set(id, position);
-                }
+            if (savedData.sessionStats) {
+                this.sessionStats = { ...this.sessionStats, ...savedData.sessionStats };
             }
             
-            if (savedData.stats) {
-                this.stats = { ...this.stats, ...savedData.stats };
-            }
-            
-            logger.info(`📊 Loaded ${this.positions.size} active, ${this.closedPositions.size} closed positions`);
+            logger.info(`📊 Loaded ${this.positions.size} active positions`);
             
         } catch (error) {
             if (error.code !== 'ENOENT') {
@@ -770,7 +748,7 @@ class PositionManager extends EventEmitter {
 
     // Get detailed position info with price history
     getPositionDetails(positionId) {
-        const position = this.positions.get(positionId) || this.closedPositions.get(positionId);
+        const position = this.positions.get(positionId);
         
         if (!position) {
             return null;
@@ -803,7 +781,7 @@ class PositionManager extends EventEmitter {
         return distribution;
     }
 
-    // 🚀 NEW: Manual position close (for emergency situations)
+    // Manual position close (for emergency situations)
     async forceClosePosition(positionId, reason = 'Force Close') {
         const position = this.positions.get(positionId);
         if (!position) throw new Error(`Position ${positionId} not found`);
@@ -816,7 +794,6 @@ class PositionManager extends EventEmitter {
         } catch (error) {
             logger.error(`❌ Force close failed for ${position.symbol}: ${error.message}`);
             
-            // Mark as failed for manual intervention
             position.status = 'FORCE_CLOSE_FAILED';
             position.errorMessage = error.message;
             position.closeReason = reason;
@@ -827,12 +804,12 @@ class PositionManager extends EventEmitter {
         }
     }
 
-    // 🚀 NEW: Get positions by status
+    // Get positions by status
     getPositionsByStatus(status) {
         return Array.from(this.positions.values()).filter(pos => pos.status === status);
     }
 
-    // 🚀 NEW: Get failed positions that need manual intervention
+    // Get failed positions that need manual intervention
     getFailedPositions() {
         return Array.from(this.positions.values()).filter(pos => 
             pos.status?.includes('FAILED') || 
@@ -840,34 +817,7 @@ class PositionManager extends EventEmitter {
         );
     }
 
-    // 🚀 NEW: Retry failed take profit executions
-    async retryFailedTakeProfits(positionId) {
-        const position = this.positions.get(positionId);
-        if (!position) throw new Error(`Position ${positionId} not found`);
-        
-        const failedTPs = position.takeProfitLevels?.filter(tp => tp.status === 'EXECUTION_FAILED') || [];
-        
-        if (failedTPs.length === 0) {
-            logger.info(`No failed take profits to retry for ${position.symbol}`);
-            return;
-        }
-        
-        logger.info(`🔄 Retrying ${failedTPs.length} failed take profits for ${position.symbol}...`);
-        
-        for (const tp of failedTPs) {
-            // Reset the failed status
-            tp.status = undefined;
-            tp.errorMessage = undefined;
-            tp.triggered = false; // Allow it to trigger again
-        }
-        
-        // Force a price check to potentially trigger the TPs again
-        await this.checkTakeProfitsWithLiveExecution(position);
-        
-        await this.savePositions();
-    }
-
-    // 🚀 NEW: Emergency stop all positions
+    // Emergency stop all positions
     async emergencyStopAllPositions(reason = 'Emergency Stop') {
         const activePositions = this.getActivePositions();
         
@@ -899,7 +849,7 @@ class PositionManager extends EventEmitter {
         return results;
     }
 
-    // 🚀 NEW: Get real-time position summary
+    // Get real-time position summary
     getRealTimePositionSummary() {
         const activePositions = this.getActivePositions();
         
