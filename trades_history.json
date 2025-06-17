@@ -503,13 +503,36 @@
       "priceSource": "pool_based",
       "status": "CLOSED",
       "retryCount": 0
+    },
+    {
+      "id": "pos_1750182066625_gqnhup514",
+      "tokenAddress": "HgHQDgcc6NPWNL3g9Q785kbqKmmW1UZvqEuCY5ZVvGQs",
+      "symbol": "UNKNOWN",
+      "entryTime": 1750182066625,
+      "exitTime": 1750182674117,
+      "entryPrice": 5.388920991678905e-7,
+      "exitPrice": 2.6565369012193075e-7,
+      "quantity": "18556.590485258766",
+      "investedAmount": 0.01,
+      "pnl": -0.001738934000000001,
+      "pnlPercentage": -17.389340000000008,
+      "exitReason": "Stop Loss (-50.7%)",
+      "duration": 607492,
+      "tradingMode": "live",
+      "entryTxHash": "4roR4Ygw7Vypv4PuUhRBemsz2h1TzPwdnirBVEJxYQSdVZTkF2Tn8Ygj7GaxzmJY4pTcaJMCJrjoYVwUV3PHZjkb",
+      "exitTxHash": "4vEkRD7YXvZZrdzxcqs1mceU8NRujWrmv725pMvZui8pogvW3t2rbf53DdLwkV4BNDz4dpruiameHVTpi5jSoNaa",
+      "eventType": "creation",
+      "twitterLikes": 999999,
+      "priceSource": "pool_based",
+      "status": "CLOSED",
+      "retryCount": 0
     }
   ],
   "summary": {
-    "totalTrades": 18,
-    "totalPnL": -0.1743,
+    "totalTrades": 19,
+    "totalPnL": -0.176038934,
     "winRate": 0,
-    "lastUpdated": "2025-06-17T16:00:08.337Z",
+    "lastUpdated": "2025-06-17T17:51:14.117Z",
     "manualReviews": 3
   }
 }

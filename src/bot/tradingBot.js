@@ -11,7 +11,9 @@ class TradingBot extends EventEmitter {
             tradingMode: config.tradingMode || process.env.TRADING_MODE || 'paper',
             initialInvestment: parseFloat(config.initialInvestment || process.env.INITIAL_INVESTMENT_SOL) || 0.01,
             stopLossPercentage: parseFloat(process.env.STOP_LOSS_PERCENTAGE) || 50,
-            slippageTolerance: parseFloat(process.env.SLIPPAGE_TOLERANCE) || 5,
+            buySlippage: parseFloat(process.env.BUY_SLIPPAGE_TOLERANCE) || 30,
+            sellSlippage: parseFloat(process.env.SELL_SLIPPAGE_TOLERANCE) || 100,
+            slippageTolerance: parseFloat(process.env.SLIPPAGE_TOLERANCE) || 30,
             privateKey: process.env.PRIVATE_KEY,
             takeProfitLevels: [
                 { percentage: 100, sellPercentage: 50 },  // 2x - sell 50%
@@ -25,10 +27,11 @@ class TradingBot extends EventEmitter {
         // PumpSwap service handles all trading operations
         this.pumpSwapService = new PumpSwapService({
             privateKey: this.config.privateKey,
-            slippageTolerance: this.config.slippageTolerance,
+            buySlippage: this.config.buySlippage,
+            sellSlippage: this.config.sellSlippage,
             rpcUrl: config.rpcUrl
         });
-        
+
         // Connect this bot to the position manager
         if (this.positionManager) {
             this.positionManager.setTradingBot(this);
@@ -58,11 +61,19 @@ class TradingBot extends EventEmitter {
             logger.info(`💰 Trading mode: ${this.config.tradingMode.toUpperCase()}`);
             logger.info(`🎯 Initial investment: ${this.config.initialInvestment} SOL`);
             logger.info(`🛡️ Stop loss: ${this.config.stopLossPercentage}%`);
-            logger.info(`💧 Slippage tolerance: ${this.config.slippageTolerance}%`);
+            
+            // 🔥 NEW: Log separate slippage settings
+            logger.info(`📈 Buy slippage: ${this.config.buySlippage}% (conservative entry)`);
+            logger.info(`📉 Sell slippage: ${this.config.sellSlippage}% (guaranteed exit)`);
             
             // Check if PumpSwap service is ready
             if (this.pumpSwapService.wallet) {
                 logger.info(`💼 Wallet: ${this.pumpSwapService.wallet.publicKey.toString()}`);
+            }
+            
+            // Log slippage strategy explanation
+            if (this.config.sellSlippage >= 50) {
+                logger.info(`🚨 High sell slippage configured - sells will execute even during major dumps`);
             }
             
             logger.info('✅ PumpSwap trading bot initialized');
@@ -113,7 +124,7 @@ class TradingBot extends EventEmitter {
                 const result = await this.pumpSwapService.executeBuy(
                     tokenAddress, 
                     investmentAmount, 
-                    this.config.slippageTolerance
+                    this.config.buySlippage
                 );
                 
                 if (result.success) {
@@ -175,7 +186,7 @@ class TradingBot extends EventEmitter {
                 const result = await this.pumpSwapService.executeSell(
                     position.tokenAddress,
                     tokenAmount,
-                    this.config.slippageTolerance
+                    this.config.sellSlippage
                 );
                 
                 if (result.success) {

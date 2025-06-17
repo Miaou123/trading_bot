@@ -15,12 +15,18 @@ class PumpSwapService {
         );
         
         this.config = {
-            slippageTolerance: config.slippageTolerance || 5,
-            maxRetries: config.maxRetries || 10, // 🔥 NEW: More retries for pool finding
-            retryDelay: config.retryDelay || 1000, // 🔥 NEW: 1 second between retries
+            buySlippage: config.buySlippage || parseFloat(process.env.BUY_SLIPPAGE_TOLERANCE) || 20,
+            sellSlippage: config.sellSlippage || parseFloat(process.env.SELL_SLIPPAGE_TOLERANCE) || 100,
+            
+            ...(config.slippageTolerance && {
+                buySlippage: config.slippageTolerance,
+                sellSlippage: config.slippageTolerance
+            }),
+            
+            maxRetries: config.maxRetries || 10,
+            retryDelay: config.retryDelay || 1000,
             ...config
         };
-
         // PumpSwap program constants
         this.PUMPSWAP_PROGRAM_ID = new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA');
         this.PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
@@ -127,30 +133,12 @@ class PumpSwapService {
         try {
             const mintPubkey = new PublicKey(tokenMint);
             
-            logger.info(`🔍 POOL DERIVATION ATTEMPT ${retryAttempts + 1}/${this.config.maxRetries}`);
-            logger.info(`   Token: ${tokenMint}`);
-            
             // 🔥 METHOD 1: Original PumpSwap derivation (most likely)
             const method1Pool = await this.derivePoolMethod1(mintPubkey);
             if (method1Pool) {
-                logger.info(`✅ POOL FOUND (Method 1): ${method1Pool.toString()}`);
                 return method1Pool;
             }
-            
-            // 🔥 METHOD 2: Alternative derivation with different seeds
-            const method2Pool = await this.derivePoolMethod2(mintPubkey);
-            if (method2Pool) {
-                logger.info(`✅ POOL FOUND (Method 2): ${method2Pool.toString()}`);
-                return method2Pool;
-            }
-            
-            // 🔥 METHOD 3: Check for multiple pool indices
-            const method3Pool = await this.derivePoolWithIndices(mintPubkey);
-            if (method3Pool) {
-                logger.info(`✅ POOL FOUND (Method 3): ${method3Pool.toString()}`);
-                return method3Pool;
-            }
-            
+        
             logger.warn(`⚠️ Pool not found with any method (attempt ${retryAttempts + 1})`);
             this.stats.poolsNotFound++;
             
@@ -382,13 +370,17 @@ class PumpSwapService {
     }
 
     // 🔥 ENHANCED: Buy with better pool finding and retry logic
-    async executeBuy(tokenMint, solAmount, slippage = null) {
+    async executeBuy(tokenMint, solAmount, customSlippage = null) {
         try {
             if (!this.wallet || !this.program) {
                 throw new Error('Wallet or program not initialized for trading');
             }
 
+            const slippageToUse = customSlippage !== null ? customSlippage : this.config.buySlippage;
+
             logger.info(`🚀 EXECUTING REAL BUY: ${solAmount} SOL → ${tokenMint}`);
+            logger.info(`🎯 Using buy slippage: ${slippageToUse}%`);
+
 
             // 🔥 ENHANCED: Use new pool finding with retries
             const poolAddress = await this.findPool(tokenMint);
@@ -446,7 +438,6 @@ class PumpSwapService {
                 throw new Error('Could not get current price');
             }
             
-            const slippageToUse = slippage || this.config.slippageTolerance;
             const slippageFactor = (100 - slippageToUse) / 100;
             const expectedTokensOut = (solAmount / currentPrice) * slippageFactor;
             const baseAmountOut = new BN(Math.floor(expectedTokensOut * 1e6)); // Assuming 6 decimals
@@ -554,7 +545,8 @@ class PumpSwapService {
                 solSpent: solAmount,
                 tokensReceived: expectedTokensOut,
                 poolAddress: poolAddress.toString(), // 🔥 NEW: Return pool address
-                type: 'BUY'
+                type: 'BUY',
+                slippageUsed: slippageToUse
             };
 
         } catch (error) {
@@ -564,11 +556,13 @@ class PumpSwapService {
         }
     }
 
-    async executeSell(tokenMint, tokenAmount, slippage = null) {
+    async executeSell(tokenMint, tokenAmount, customSlippage = null) {
         try {
             if (!this.wallet || !this.program) {
                 throw new Error('Wallet or program not initialized for trading');
             }
+
+            const slippageToUse = customSlippage !== null ? customSlippage : this.config.sellSlippage;
     
             logger.info(`🚀 EXECUTING REAL SELL: ${tokenAmount} tokens → SOL`);
     
@@ -596,7 +590,6 @@ class PumpSwapService {
     
             const baseAmountIn = new BN(tokenAmount * 1e6);
             const expectedSolOutput = await this.getExpectedSolOutput(poolAddress, baseAmountIn, mintPubkey);
-            const slippageToUse = slippage || this.config.slippageTolerance;
             const slippageFactor = new BN(100 - slippageToUse);
             const minQuoteOut = expectedSolOutput.mul(slippageFactor).div(new BN(100));
     
@@ -667,12 +660,10 @@ class PumpSwapService {
     
             instructions.push(sellIx);
     
-            // 🔥 NEW: Add automatic wSOL unwrapping instructions
-            // Close WSOL account to automatically unwrap to native SOL
             const closeAccountIx = createCloseAccountInstruction(
                 userQuoteTokenAccount,
-                this.wallet.publicKey, // SOL goes back to wallet
-                this.wallet.publicKey  // Account owner
+                this.wallet.publicKey, 
+                this.wallet.publicKey  
             );
             
             instructions.push(closeAccountIx);
@@ -711,13 +702,33 @@ class PumpSwapService {
                 tokensSpent: tokenAmount,
                 poolAddress: poolAddress.toString(),
                 type: 'SELL',
-                unwrapped: true // 🔥 NEW: Flag to indicate wSOL was automatically unwrapped
+                unwrapped: true,
+                slippageUsed: slippageToUse
             };
     
         } catch (error) {
             this.stats.errors++;
             logger.error('❌ Sell failed:', error.message);
             throw error;
+        }
+    }
+
+    getSlippageSettings() {
+        return {
+            buySlippage: this.config.buySlippage,
+            sellSlippage: this.config.sellSlippage
+        };
+    }
+
+    // Method to update slippage settings at runtime
+    updateSlippageSettings(buySlippage = null, sellSlippage = null) {
+        if (buySlippage !== null) {
+            this.config.buySlippage = buySlippage;
+            logger.info(`🎯 Updated buy slippage to: ${buySlippage}%`);
+        }
+        if (sellSlippage !== null) {
+            this.config.sellSlippage = sellSlippage;
+            logger.info(`🎯 Updated sell slippage to: ${sellSlippage}%`);
         }
     }
 
