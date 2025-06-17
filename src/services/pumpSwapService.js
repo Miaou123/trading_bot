@@ -1,7 +1,7 @@
 // src/services/pumpSwapService.js - FIXED: Better pool derivation and debugging
 const { Connection, PublicKey, Keypair, VersionedTransaction, TransactionMessage, SystemProgram, ComputeBudgetProgram } = require('@solana/web3.js');
 const { AccountLayout, NATIVE_MINT, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = require('@solana/spl-token');
-const { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } = require('@solana/spl-token');
+const { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createCloseAccountInstruction } = require('@solana/spl-token');
 const BN = require('bn.js');
 const logger = require('../utils/logger');
 const anchor = require('@coral-xyz/anchor');
@@ -569,68 +569,68 @@ class PumpSwapService {
             if (!this.wallet || !this.program) {
                 throw new Error('Wallet or program not initialized for trading');
             }
-
+    
             logger.info(`🚀 EXECUTING REAL SELL: ${tokenAmount} tokens → SOL`);
-
+    
             const poolAddress = await this.findPool(tokenMint);
             if (!poolAddress) {
                 throw new Error('Pool not found');
             }
-
+    
             logger.info(`🏊 Using pool: ${poolAddress.toString()}`);
-
+    
             const mintPubkey = new PublicKey(tokenMint);
             const quoteMint = this.WSOL_MINT;
-
+    
             const coinCreator = await this.getPoolCoinCreator(poolAddress);
             if (!coinCreator) {
                 throw new Error('Coin creator not found');
             }
-
+    
             const protocolFeeRecipients = await this.getProtocolFeeRecipients();
             if (protocolFeeRecipients.length === 0) {
                 throw new Error('No protocol fee recipients found');
             }
-
+    
             const protocolFeeRecipient = protocolFeeRecipients[0];
-
+    
             const baseAmountIn = new BN(tokenAmount * 1e6);
             const expectedSolOutput = await this.getExpectedSolOutput(poolAddress, baseAmountIn, mintPubkey);
             const slippageToUse = slippage || this.config.slippageTolerance;
             const slippageFactor = new BN(100 - slippageToUse);
             const minQuoteOut = expectedSolOutput.mul(slippageFactor).div(new BN(100));
-
+    
             logger.info(`💰 Selling ${tokenAmount} tokens for ~${(parseFloat(expectedSolOutput.toString()) / 1e9).toFixed(6)} SOL`);
-
+    
             const [globalConfig] = PublicKey.findProgramAddressSync(
                 [Buffer.from("global_config")],
                 this.PUMPSWAP_PROGRAM_ID
             );
-
+    
             const [eventAuthority] = PublicKey.findProgramAddressSync(
                 [Buffer.from("__event_authority")],
                 this.PUMPSWAP_PROGRAM_ID
             );
-
+    
             const [coinCreatorVaultAuthority] = PublicKey.findProgramAddressSync(
                 [Buffer.from("creator_vault"), coinCreator.toBytes()],
                 this.PUMPSWAP_PROGRAM_ID
             );
-
+    
             const userBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
             const userQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, this.wallet.publicKey);
             const poolBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, poolAddress, true);
             const poolQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, poolAddress, true);
             const protocolFeeRecipientTokenAccount = getAssociatedTokenAddressSync(quoteMint, protocolFeeRecipient, true);
             const coinCreatorVaultAta = getAssociatedTokenAddressSync(quoteMint, coinCreatorVaultAuthority, true);
-
+    
             const instructions = [];
-
+    
             instructions.push(
                 ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 }),
                 ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 })
             );
-
+    
             instructions.push(
                 createAssociatedTokenAccountIdempotentInstruction(
                     this.wallet.publicKey,
@@ -639,7 +639,7 @@ class PumpSwapService {
                     quoteMint
                 )
             );
-
+    
             const sellIx = await this.program.methods
                 .sell(baseAmountIn, minQuoteOut)
                 .accounts({
@@ -664,45 +664,56 @@ class PumpSwapService {
                     coinCreatorVaultAuthority: coinCreatorVaultAuthority,
                 })
                 .instruction();
-
+    
             instructions.push(sellIx);
-
+    
+            // 🔥 NEW: Add automatic wSOL unwrapping instructions
+            // Close WSOL account to automatically unwrap to native SOL
+            const closeAccountIx = createCloseAccountInstruction(
+                userQuoteTokenAccount,
+                this.wallet.publicKey, // SOL goes back to wallet
+                this.wallet.publicKey  // Account owner
+            );
+            
+            instructions.push(closeAccountIx);
+    
             const { blockhash } = await this.connection.getLatestBlockhash();
             const message = new TransactionMessage({
                 payerKey: this.wallet.publicKey,
                 recentBlockhash: blockhash,
                 instructions: instructions,
             }).compileToV0Message();
-
+    
             const transaction = new VersionedTransaction(message);
             transaction.sign([this.wallet]);
-
-            logger.info('📤 Sending sell transaction...');
+    
+            logger.info('📤 Sending sell transaction with automatic wSOL unwrapping...');
             const signature = await this.connection.sendTransaction(transaction, {
                 maxRetries: 3
             });
             
             // Wait for confirmation
             await this.connection.confirmTransaction(signature, 'confirmed');
-
+    
             this.stats.sellsExecuted++;
             const solReceived = parseFloat(expectedSolOutput.toString()) / 1e9;
-
+    
             logger.info(`✅ SELL SUCCESS!`);
             logger.info(`   Signature: ${signature}`);
             logger.info(`   Pool Used: ${poolAddress.toString()}`);
-            logger.info(`   SOL Received: ~${solReceived.toFixed(6)} SOL`);
+            logger.info(`   SOL Received: ~${solReceived.toFixed(6)} SOL (automatically unwrapped)`);
             logger.info(`   Explorer: https://solscan.io/tx/${signature}`);
-
+    
             return {
                 success: true,
                 signature: signature,
                 solReceived: solReceived,
                 tokensSpent: tokenAmount,
-                poolAddress: poolAddress.toString(), // 🔥 NEW: Return pool address
-                type: 'SELL'
+                poolAddress: poolAddress.toString(),
+                type: 'SELL',
+                unwrapped: true // 🔥 NEW: Flag to indicate wSOL was automatically unwrapped
             };
-
+    
         } catch (error) {
             this.stats.errors++;
             logger.error('❌ Sell failed:', error.message);
