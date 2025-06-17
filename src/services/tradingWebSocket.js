@@ -1,4 +1,4 @@
-// src/services/tradingWebSocket.js - FIXED: Subscribe only to desired events based on bot mode
+// src/services/tradingWebSocket.js - MODIFIED: Twitter check disabled for testing
 const WebSocket = require('ws');
 const EventEmitter = require('events');
 const axios = require('axios');
@@ -12,11 +12,13 @@ class TradingWebSocket extends EventEmitter {
         this.minLikes = config.minLikes || parseInt(process.env.MIN_TWITTER_LIKES) || 100;
         this.connectionId = Math.random().toString(36).substring(7);
         
-        // 🔥 NEW: Bot mode to control which events to subscribe to
-        this.botMode = config.botMode || process.env.BOT_MODE || 'both'; // 'creation', 'migration', 'both'
+        // 🔥 TESTING MODE: Disable Twitter checks
+        this.disableTwitterCheck = config.disableTwitterCheck !== undefined ? config.disableTwitterCheck : false;
+        
+        this.botMode = config.botMode || process.env.BOT_MODE || 'both';
         
         this.httpClient = axios.create({
-            timeout: 5000, // 5 second timeout for IPFS
+            timeout: 5000,
             headers: { 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Connection': 'keep-alive'
@@ -24,10 +26,8 @@ class TradingWebSocket extends EventEmitter {
             keepAlive: true
         });
 
-        // IPFS metadata cache to avoid repeated fetches
         this.metadataCache = new Map();
         
-        // Track message stats
         this.messageStats = {
             received: 0,
             processed: 0,
@@ -38,24 +38,26 @@ class TradingWebSocket extends EventEmitter {
             errors: 0
         };
         
-        // Clean up cache periodically
-        setInterval(() => this.cleanupCache(), 60000); // Every minute
+        setInterval(() => this.cleanupCache(), 60000);
     }
 
     connect() {
         logger.info(`[${this.connectionId}] Connecting to PumpPortal for trading signals...`);
         logger.info(`[${this.connectionId}] 🎯 Bot Mode: ${this.botMode.toUpperCase()}`);
         
+        // 🔥 TESTING: Log Twitter check status
+        if (this.disableTwitterCheck) {
+            logger.info(`[${this.connectionId}] 🚫 TESTING MODE: Twitter checks DISABLED - Will trade ALL tokens!`);
+        } else {
+            logger.info(`[${this.connectionId}] 🐦 Twitter checks ENABLED - Min likes: ${this.minLikes}`);
+        }
+        
         this.ws = new WebSocket('wss://pumpportal.fun/api/data');
         
         this.ws.on('open', () => {
             logger.info(`[${this.connectionId}] 🔗 Connected to PumpPortal`);
             this.isConnected = true;
-            
-            // 🔥 CONDITIONAL SUBSCRIPTION based on bot mode
             this.subscribeBasedOnMode();
-            
-            logger.info(`[${this.connectionId}] 📊 Minimum likes threshold: ${this.minLikes}`);
         });
 
         this.ws.on('message', async (data) => {
@@ -64,15 +66,12 @@ class TradingWebSocket extends EventEmitter {
             try {
                 const message = JSON.parse(data.toString());
                 
-                // Skip subscription confirmations
                 if (message.message && message.message.includes('Successfully subscribed')) {
                     logger.info(`[${this.connectionId}] ✅ ${message.message}`);
                     return;
                 }
                 
-                // 🔥 PROCESS ONLY RELEVANT EVENTS based on bot mode
                 if (message.txType === 'create' && message.mint) {
-                    // Only process if bot mode allows creations
                     if (this.shouldProcessEventType('creation')) {
                         this.messageStats.creations++;
                         logger.info(`[${this.connectionId}] 🪙 New token: ${message.symbol} - ${message.mint}`);
@@ -82,7 +81,6 @@ class TradingWebSocket extends EventEmitter {
                     }
                 }
                 else if (message.txType === 'migrate' && message.mint) {
-                    // Only process if bot mode allows migrations
                     if (this.shouldProcessEventType('migration')) {
                         this.messageStats.migrations++;
                         logger.info(`[${this.connectionId}] 🔄 Migration: ${message.mint} (pool: ${message.pool || 'unknown'})`);
@@ -91,7 +89,6 @@ class TradingWebSocket extends EventEmitter {
                         logger.debug(`[${this.connectionId}] ⏭️ Ignoring migration (mode: ${this.botMode}): ${message.mint}`);
                     }
                 }
-                // Handle legacy migration format (just in case)
                 else if (message.txType === 'migration' && message.mint) {
                     if (this.shouldProcessEventType('migration')) {
                         this.messageStats.migrations++;
@@ -101,7 +98,6 @@ class TradingWebSocket extends EventEmitter {
                         logger.debug(`[${this.connectionId}] ⏭️ Ignoring legacy migration (mode: ${this.botMode}): ${message.mint}`);
                     }
                 }
-                // Log unknown events for debugging (only if we care about them)
                 else if (message.mint) {
                     logger.debug(`[${this.connectionId}] ❓ Unknown event: ${message.txType || 'NO_TYPE'} for ${message.mint}`);
                 }
@@ -123,7 +119,6 @@ class TradingWebSocket extends EventEmitter {
         });
     }
 
-    // 🔥 NEW: Subscribe only to relevant events based on bot mode
     subscribeBasedOnMode() {
         switch (this.botMode) {
             case 'creation':
@@ -145,7 +140,6 @@ class TradingWebSocket extends EventEmitter {
         }
     }
 
-    // 🔥 NEW: Check if we should process this event type based on bot mode
     shouldProcessEventType(eventType) {
         switch (this.botMode) {
             case 'creation':
@@ -169,7 +163,42 @@ class TradingWebSocket extends EventEmitter {
             
             logger.info(`[${this.connectionId}] 🔍 PROCESSING: ${tokenSymbol} (${eventType})`);
             
-            // Extract Twitter URL with IPFS fallback
+            // 🔥 TESTING MODE: Skip Twitter check if disabled
+            if (this.disableTwitterCheck) {
+                logger.info(`[${this.connectionId}] 🚫 TESTING: Skipping Twitter check for ${tokenSymbol} (${eventType})`);
+                
+                // Emit qualified token immediately without Twitter check
+                this.messageStats.qualified++;
+                const totalTime = Date.now() - processingStart;
+                
+                logger.info(`[${this.connectionId}] ✅ QUALIFIED (NO TWITTER CHECK): ${tokenSymbol} (${eventType}) - ${totalTime}ms total`);
+                
+                const qualifiedData = {
+                    eventType: eventType,
+                    token: {
+                        address: tokenData.mint,
+                        symbol: tokenData.symbol || 'UNKNOWN',
+                        name: tokenData.name || 'Unknown Token'
+                    },
+                    twitter: {
+                        likes: 999999, // Fake high number to pass any downstream checks
+                        url: 'TESTING_MODE_NO_TWITTER_CHECK'
+                    },
+                    migration: eventType === 'migration' ? {
+                        pool: tokenData.pool || 'unknown',
+                        signature: tokenData.signature
+                    } : undefined,
+                    performance: {
+                        processingTime: totalTime,
+                        likesCheckTime: 0
+                    }
+                };
+                
+                this.emit('qualifiedToken', qualifiedData);
+                return;
+            }
+            
+            // 🔥 ORIGINAL TWITTER CHECK CODE (when testing mode is disabled)
             const twitterUrl = await this.extractTwitterUrlWithIPFS(tokenData);
             if (!twitterUrl) {
                 this.messageStats.skipped++;
@@ -179,7 +208,6 @@ class TradingWebSocket extends EventEmitter {
 
             logger.info(`[${this.connectionId}] 🐦 CHECKING: ${tokenSymbol} (${eventType}) - Twitter: ${twitterUrl}`);
 
-            // Check likes
             const likesStart = Date.now();
             const likes = await this.checkLikes(twitterUrl);
             const likesTime = Date.now() - likesStart;
@@ -190,7 +218,6 @@ class TradingWebSocket extends EventEmitter {
                 return;
             }
 
-            // 🚀 QUALIFIED - emit for trading
             this.messageStats.qualified++;
             const totalTime = Date.now() - processingStart;
             
@@ -207,12 +234,10 @@ class TradingWebSocket extends EventEmitter {
                     likes: likes,
                     url: twitterUrl
                 },
-                // Include migration-specific data
                 migration: eventType === 'migration' ? {
                     pool: tokenData.pool || 'unknown',
                     signature: tokenData.signature
                 } : undefined,
-                // Performance metrics
                 performance: {
                     processingTime: totalTime,
                     likesCheckTime: likesTime
@@ -227,18 +252,26 @@ class TradingWebSocket extends EventEmitter {
         }
     }
 
-    // Extract Twitter URL with IPFS metadata fallback + better logging
+    // 🔥 TESTING METHOD: Enable/disable Twitter checks at runtime
+    setTwitterCheckEnabled(enabled) {
+        this.disableTwitterCheck = !enabled;
+        if (enabled) {
+            logger.info(`[${this.connectionId}] 🐦 Twitter checks ENABLED - Min likes: ${this.minLikes}`);
+        } else {
+            logger.info(`[${this.connectionId}] 🚫 Twitter checks DISABLED - Trading ALL tokens!`);
+        }
+    }
+
+    // Rest of the methods remain unchanged...
     async extractTwitterUrlWithIPFS(tokenData) {
         const tokenAddress = tokenData.mint;
         
-        // Step 1: Check direct fields in WebSocket message
         const directUrl = this.extractDirectTwitterUrl(tokenData);
         if (directUrl) {
             logger.debug(`[${this.connectionId}] ✅ Twitter URL found in WebSocket message: ${directUrl}`);
             return directUrl;
         }
 
-        // Step 2: Fetch IPFS metadata if available
         const ipfsUrl = await this.fetchIPFSMetadata(tokenAddress, tokenData.uri);
         if (ipfsUrl) {
             logger.debug(`[${this.connectionId}] ✅ Twitter URL found in IPFS metadata: ${ipfsUrl}`);
@@ -249,7 +282,6 @@ class TradingWebSocket extends EventEmitter {
         return null;
     }
 
-    // Extract Twitter URL from direct WebSocket fields
     extractDirectTwitterUrl(tokenData) {
         const fieldsToCheck = ['twitter', 'description', 'website'];
         
@@ -266,10 +298,8 @@ class TradingWebSocket extends EventEmitter {
         return null;
     }
 
-    // Fetch IPFS metadata and extract Twitter URL with better error handling
     async fetchIPFSMetadata(tokenAddress, uriFromMessage = null) {
         try {
-            // Check cache first
             if (this.metadataCache.has(tokenAddress)) {
                 const cached = this.metadataCache.get(tokenAddress);
                 logger.debug(`[${this.connectionId}] 📁 Using cached metadata for ${tokenAddress}`);
@@ -278,7 +308,6 @@ class TradingWebSocket extends EventEmitter {
 
             let metadataUri = uriFromMessage;
             
-            // If no URI in message, get it from Helius
             if (!metadataUri) {
                 metadataUri = await this.getMetadataURI(tokenAddress);
             }
@@ -288,7 +317,6 @@ class TradingWebSocket extends EventEmitter {
                 return null;
             }
 
-            // Convert IPFS URIs to HTTP
             if (metadataUri.startsWith('ipfs://')) {
                 metadataUri = metadataUri.replace('ipfs://', 'https://ipfs.io/ipfs/');
             } else if (metadataUri.startsWith('ar://')) {
@@ -297,14 +325,11 @@ class TradingWebSocket extends EventEmitter {
 
             logger.debug(`[${this.connectionId}] 📁 Fetching IPFS metadata: ${metadataUri}`);
             
-            // Fetch metadata from IPFS
             const response = await this.httpClient.get(metadataUri);
             const metadata = response.data;
             
-            // Extract Twitter URL from metadata
             const twitterUrl = this.extractTwitterFromMetadata(metadata);
             
-            // Cache result (even if null) - cache for 5 minutes
             this.metadataCache.set(tokenAddress, {
                 metadata: metadata,
                 twitterUrl: twitterUrl,
@@ -316,7 +341,6 @@ class TradingWebSocket extends EventEmitter {
             
         } catch (error) {
             logger.debug(`[${this.connectionId}] ❌ IPFS metadata fetch failed for ${tokenAddress}: ${error.message}`);
-            // Cache negative result to avoid repeated failures
             this.metadataCache.set(tokenAddress, {
                 metadata: null,
                 twitterUrl: null,
@@ -326,7 +350,6 @@ class TradingWebSocket extends EventEmitter {
         }
     }
 
-    // Get metadata URI from Helius API
     async getMetadataURI(tokenAddress) {
         try {
             if (!process.env.HELIUS_RPC_URL) {
@@ -351,13 +374,11 @@ class TradingWebSocket extends EventEmitter {
         }
     }
 
-    // Extract Twitter URL from IPFS metadata
     extractTwitterFromMetadata(metadata) {
         if (!metadata || typeof metadata !== 'object') {
             return null;
         }
         
-        // Check common fields where Twitter URL might be stored
         const fieldsToCheck = [
             'twitter',
             'website', 
@@ -378,7 +399,6 @@ class TradingWebSocket extends EventEmitter {
             }
         }
         
-        // Check attributes array
         if (metadata.attributes && Array.isArray(metadata.attributes)) {
             for (const attr of metadata.attributes) {
                 if (attr.trait_type && attr.trait_type.toLowerCase().includes('twitter') && attr.value) {
@@ -394,7 +414,6 @@ class TradingWebSocket extends EventEmitter {
         return null;
     }
 
-    // Helper: Get nested object value
     getNestedValue(obj, path) {
         return path.split('.').reduce((current, key) => {
             return current && current[key] !== undefined ? current[key] : null;
@@ -435,10 +454,9 @@ class TradingWebSocket extends EventEmitter {
         return match ? match[1] : null;
     }
 
-    // Clean up cache periodically with better logging
     cleanupCache() {
         const now = Date.now();
-        const maxAge = 300000; // 5 minutes
+        const maxAge = 300000;
         const sizeBefore = this.metadataCache.size;
         
         for (const [key, value] of this.metadataCache.entries()) {
@@ -453,12 +471,12 @@ class TradingWebSocket extends EventEmitter {
         }
     }
 
-    // Get comprehensive stats including bot mode
     getStats() {
         return {
             connectionId: this.connectionId,
             isConnected: this.isConnected,
             botMode: this.botMode,
+            twitterCheckEnabled: !this.disableTwitterCheck, // 🔥 NEW STAT
             messageStats: this.messageStats,
             cacheSize: this.metadataCache.size,
             minLikes: this.minLikes,
@@ -467,10 +485,10 @@ class TradingWebSocket extends EventEmitter {
         };
     }
 
-    // Get stats string for logging
     getStatsString() {
         const stats = this.getStats();
-        return `📊 Trading Bot Stats (${stats.botMode.toUpperCase()} mode): ${stats.messageStats.received} received | ${stats.messageStats.processed} processed | ${stats.messageStats.creations} creations | ${stats.messageStats.migrations} migrations | ${stats.messageStats.qualified} qualified | ${stats.messageStats.skipped} skipped | ${stats.messageStats.errors} errors | Qualification rate: ${stats.qualificationRate}`;
+        const twitterStatus = stats.twitterCheckEnabled ? `Twitter: ${this.minLikes}+ likes` : 'Twitter: DISABLED';
+        return `📊 Trading Bot Stats (${stats.botMode.toUpperCase()} mode, ${twitterStatus}): ${stats.messageStats.received} received | ${stats.messageStats.processed} processed | ${stats.messageStats.creations} creations | ${stats.messageStats.migrations} migrations | ${stats.messageStats.qualified} qualified | ${stats.messageStats.skipped} skipped | ${stats.messageStats.errors} errors | Qualification rate: ${stats.qualificationRate}`;
     }
 
     disconnect() {
@@ -481,10 +499,7 @@ class TradingWebSocket extends EventEmitter {
             this.isConnected = false;
         }
         
-        // Clean up cache
         this.metadataCache.clear();
-        
-        // Log final stats
         logger.info(`[${this.connectionId}] Final stats: ${this.getStatsString()}`);
     }
 }

@@ -122,7 +122,6 @@ class PumpSwapService {
     async findPool(tokenMint) {
         try {
             const mintPubkey = new PublicKey(tokenMint);
-            logger.info(`🔍 Deriving PumpSwap pool for: ${tokenMint}`);
             
             const [poolAuthority] = PublicKey.findProgramAddressSync(
                 [Buffer.from("pool-authority"), mintPubkey.toBytes()],
@@ -143,12 +142,10 @@ class PumpSwapService {
                 this.PUMPSWAP_PROGRAM_ID
             );
             
-            logger.info(`✅ Pool derived: ${poolPda.toString()}`);
             this.stats.poolsDerivied++;
             
             const poolAccountInfo = await this.connection.getAccountInfo(poolPda);
             if (poolAccountInfo) {
-                logger.info(`✅ Pool exists on-chain!`);
                 this.stats.poolsFound++;
                 return poolPda;
             } else {
@@ -569,7 +566,6 @@ class PumpSwapService {
 
     async getMarketData(tokenMint) {
         try {
-            logger.info(`📊 Getting market data for: ${tokenMint}`);
             
             const poolAddress = await this.findPool(tokenMint);
             if (!poolAddress) {

@@ -1,4 +1,4 @@
-// src/bot/positionManager.js - UPDATED: Clean separation of active positions and trade history
+// src/bot/positionManager.js - ENHANCED: Transaction confirmation tracking with clean state management
 const EventEmitter = require('events');
 const fs = require('fs').promises;
 const path = require('path');
@@ -15,13 +15,14 @@ class PositionManager extends EventEmitter {
             maxPositions: config.maxPositions || 20,
             fastUpdateInterval: config.fastUpdateInterval || 1000,
             slowUpdateInterval: config.slowUpdateInterval || 60000,
+            confirmationDelay: config.confirmationDelay || 5000, // 5 seconds
+            maxRetries: config.maxRetries || 3,
             ...config
         };
 
-        // Only active positions - NO closed positions here
+        // Only ACTIVE and PENDING_SELL positions
         this.positions = new Map();
         
-        // Trade history is handled separately
         this.tradingBot = null;
         
         // Track price source performance
@@ -43,7 +44,12 @@ class PositionManager extends EventEmitter {
             paperSellsExecuted: 0,
             stopLossExecutions: 0,
             takeProfitExecutions: 0,
-            sessionPnL: 0
+            sessionPnL: 0,
+            confirmationChecks: 0,
+            confirmationSuccesses: 0,
+            confirmationFailures: 0,
+            retryAttempts: 0,
+            manualReviewCount: 0
         };
         
         this.loadPositions();
@@ -53,23 +59,25 @@ class PositionManager extends EventEmitter {
 
     setTradingBot(tradingBot) {
         this.tradingBot = tradingBot;
-        logger.info('📊 Enhanced TradingBot connected for live trading & price updates');
+        logger.info('📊 Enhanced TradingBot connected with transaction confirmation tracking');
     }
 
     // Enhanced price updates with live monitoring
     startEnhancedPriceUpdates() {
-        // Fast updates for live trading (1 second for critical monitoring)
+        // Fast updates for ACTIVE positions only (not pending)
         setInterval(async () => {
-            if (this.positions.size > 0 && this.tradingBot) {
-                logger.debug(`🔄 Starting fast price update cycle for ${this.positions.size} positions`);
+            const activePositions = this.getActivePositions();
+            if (activePositions.length > 0 && this.tradingBot) {
+                logger.debug(`🔄 Starting fast price update cycle for ${activePositions.length} active positions`);
                 await this.updateAllPositionsFast();
             }
         }, this.config.fastUpdateInterval);
         
-        // Slower fallback updates (1 minute)
+        // Slower fallback updates
         setInterval(async () => {
-            if (this.positions.size > 0 && this.tradingBot) {
-                logger.debug(`🔄 Starting fallback price update cycle for ${this.positions.size} positions`);
+            const activePositions = this.getActivePositions();
+            if (activePositions.length > 0 && this.tradingBot) {
+                logger.debug(`🔄 Starting fallback price update cycle for ${activePositions.length} active positions`);
                 await this.updateAllPositionsSlow();
             }
         }, this.config.slowUpdateInterval);
@@ -77,6 +85,8 @@ class PositionManager extends EventEmitter {
         logger.info(`📊 Enhanced price monitoring started:`);
         logger.info(`   🔧 Pool-based: ${this.config.fastUpdateInterval}ms intervals`);
         logger.info(`   🪐 Fallback: ${this.config.slowUpdateInterval}ms intervals`);
+        logger.info(`   🔍 Confirmation delay: ${this.config.confirmationDelay}ms`);
+        logger.info(`   🔄 Max retries: ${this.config.maxRetries}`);
     }
 
     // Enhanced price stats logging with position monitoring
@@ -93,11 +103,12 @@ class PositionManager extends EventEmitter {
                     const changeIcon = priceChange > 0 ? '↗' : priceChange < 0 ? '↘' : '→';
                     const source = pos.lastPriceSource === 'pool_based' ? 'P' : 
                                   pos.lastPriceSource === 'fallback' ? 'F' : 'U';
+                    const statusIcon = pos.status === 'PENDING_SELL' ? '⏳' : '🔵';
                     
-                    return `${pos.symbol || pos.tokenAddress.slice(0,8)}:${currentPrice.toFixed(8)}${changeIcon}${priceChange.toFixed(1)}%[${source}]`;
+                    return `${statusIcon}${pos.symbol || pos.tokenAddress.slice(0,8)}:${currentPrice.toFixed(8)}${changeIcon}${priceChange.toFixed(1)}%[${source}]`;
                 });
                 
-                logger.info(`📊 ACTIVE POSITIONS: ${positionSummaries.join(' | ')}`);
+                logger.info(`📊 POSITIONS: ${positionSummaries.join(' | ')}`);
             }
             
             // Show detailed stats if there were price updates
@@ -118,6 +129,9 @@ class PositionManager extends EventEmitter {
                     logger.info(`   🛑 Stop losses: ${this.sessionStats.stopLossExecutions}`);
                     logger.info(`   🎯 Take profits: ${this.sessionStats.takeProfitExecutions}`);
                     logger.info(`   💎 Session PnL: ${this.sessionStats.sessionPnL.toFixed(6)} SOL`);
+                    logger.info(`   🔍 Confirmations: ${this.sessionStats.confirmationSuccesses}/${this.sessionStats.confirmationChecks}`);
+                    logger.info(`   🔄 Retries: ${this.sessionStats.retryAttempts}`);
+                    logger.info(`   ⚠️ Manual reviews: ${this.sessionStats.manualReviewCount}`);
                 }
                 
                 // Reset stats
@@ -127,9 +141,10 @@ class PositionManager extends EventEmitter {
         }, 60000); // Every minute
     }
 
-    // FAST: Update all positions using pool-based method
+    // FAST: Update all ACTIVE positions only (skip pending)
     async updateAllPositionsFast() {
-        for (const position of this.positions.values()) {
+        const activePositions = this.getActivePositions();
+        for (const position of activePositions) {
             try {
                 logger.debug(`🔧 Fast update for ${position.symbol} (${position.tokenAddress.slice(0,8)})`);
                 
@@ -139,7 +154,7 @@ class PositionManager extends EventEmitter {
                     logger.debug(`✅ Price update successful for ${position.symbol}: ${position.currentPrice} → ${currentPrice}`);
                     await this.updatePositionPrice(position, currentPrice, 'pool_based');
                     
-                    // Check triggers after price update with live execution
+                    // Check triggers after price update
                     await this.checkStopLossWithLiveExecution(position);
                     await this.checkTakeProfitsWithLiveExecution(position);
                 } else if (currentPrice === position.currentPrice) {
@@ -154,9 +169,10 @@ class PositionManager extends EventEmitter {
         }
     }
 
-    // SLOW: Update all positions using fallback method
+    // SLOW: Update all ACTIVE positions using fallback method
     async updateAllPositionsSlow() {
-        for (const position of this.positions.values()) {
+        const activePositions = this.getActivePositions();
+        for (const position of activePositions) {
             try {
                 const timeSinceLastUpdate = Date.now() - (position.lastPriceUpdate || 0);
                 
@@ -314,9 +330,374 @@ class PositionManager extends EventEmitter {
         logger.debug(`${position.symbol}: ${newPrice.toFixed(8)} SOL (${priceChange > 0 ? '+' : ''}${priceChange.toFixed(2)}%) via ${source}`);
     }
 
-    // Check stop loss with LIVE execution
+    // 🔥 ENHANCED: Execute sell with transaction confirmation tracking
+    async executePumpSwapSell(position, sellPercentage, reason = 'Manual Sell') {
+        try {
+            // Prevent double-selling
+            if (position.status === 'PENDING_SELL') {
+                logger.warn(`⚠️ Position ${position.symbol} already has pending sell`);
+                return { success: false, error: 'Sell already pending' };
+            }
+
+            // Update position to pending
+            position.status = 'PENDING_SELL';
+            position.pendingReason = reason;
+            position.pendingSellPercentage = sellPercentage;
+            position.pendingStartTime = Date.now();
+            position.retryCount = (position.retryCount || 0);
+            
+            this.positions.set(position.id, position);
+            await this.savePositions();
+
+            logger.info(`⏳ Position ${position.symbol} set to PENDING_SELL`);
+
+            if (this.config.tradingMode === 'live') {
+                return await this.executeLiveSellWithConfirmation(position, sellPercentage, reason);
+            } else {
+                return await this.executePaperSell(position, sellPercentage, reason);
+            }
+
+        } catch (error) {
+            // Reset position status on error
+            position.status = 'ACTIVE';
+            position.errorMessage = error.message;
+            this.positions.set(position.id, position);
+            await this.savePositions();
+            throw error;
+        }
+    }
+
+    async executeLiveSellWithConfirmation(position, sellPercentage, reason) {
+        try {
+            const tokenAmount = parseFloat(position.remainingQuantity) * (sellPercentage / 100);
+            
+            logger.info(`🚀 Executing LIVE sell: ${tokenAmount.toFixed(6)} ${position.symbol} (${reason})`);
+            
+            // Execute the sell transaction
+            const result = await this.tradingBot.pumpSwapService.executeSell(
+                position.tokenAddress,
+                tokenAmount,
+                this.tradingBot.config.slippageTolerance
+            );
+            
+            if (result.success) {
+                // Store transaction info for confirmation
+                position.pendingTxHash = result.signature;
+                position.pendingTokenAmount = tokenAmount;
+                position.pendingSellPercentage = sellPercentage;
+                
+                this.positions.set(position.id, position);
+                await this.savePositions();
+                
+                // Schedule confirmation check
+                this.scheduleConfirmationCheck(position.id, result.signature);
+                
+                logger.info(`📤 Sell submitted: ${result.signature} - checking confirmation in ${this.config.confirmationDelay}ms`);
+                
+                return {
+                    success: true,
+                    signature: result.signature,
+                    pending: true,
+                    message: 'Transaction submitted, awaiting confirmation'
+                };
+            } else {
+                throw new Error('Transaction submission failed');
+            }
+            
+        } catch (error) {
+            logger.error(`❌ Live sell execution failed: ${error.message}`);
+            
+            // Increment retry count
+            position.retryCount = (position.retryCount || 0) + 1;
+            this.sessionStats.retryAttempts++;
+            
+            if (position.retryCount >= this.config.maxRetries) {
+                // Move to manual review after max retries
+                await this.moveToManualReview(position, `Max retries exceeded: ${error.message}`);
+            } else {
+                // Reset to active for retry
+                position.status = 'ACTIVE';
+                position.lastRetryError = error.message;
+                this.positions.set(position.id, position);
+                await this.savePositions();
+                
+                logger.warn(`⚠️ Sell failed (retry ${position.retryCount}/${this.config.maxRetries}), will retry`);
+            }
+            
+            throw error;
+        }
+    }
+
+    async executePaperSell(position, sellPercentage, reason) {
+        // Paper trading - simulate immediate success
+        const tokenAmount = parseFloat(position.remainingQuantity) * (sellPercentage / 100);
+        const currentPrice = position.currentPrice || position.entryPrice;
+        const solReceived = tokenAmount * currentPrice;
+        const originalInvestment = (tokenAmount / parseFloat(position.quantity)) * position.investedAmount;
+        const pnl = solReceived - originalInvestment;
+        
+        logger.info(`📝 Paper sell: ${tokenAmount.toFixed(6)} ${position.symbol} for ${solReceived.toFixed(6)} SOL`);
+        
+        // For paper trading, immediately complete
+        await this.completeSell(position.id, {
+            tokenAmount,
+            solReceived,
+            pnl,
+            signature: 'PAPER_SELL_' + Date.now(),
+            reason
+        });
+        
+        this.sessionStats.paperSellsExecuted++;
+        
+        return {
+            success: true,
+            signature: 'PAPER_SELL_' + Date.now(),
+            solReceived,
+            pnl,
+            pending: false
+        };
+    }
+
+    // Schedule confirmation check after delay
+    scheduleConfirmationCheck(positionId, txHash) {
+        setTimeout(async () => {
+            await this.checkTransactionConfirmation(positionId, txHash);
+        }, this.config.confirmationDelay);
+    }
+
+    // Check if transaction was confirmed on-chain
+    async checkTransactionConfirmation(positionId, txHash) {
+        try {
+            const position = this.positions.get(positionId);
+            if (!position || position.status !== 'PENDING_SELL') {
+                logger.debug(`Position ${positionId} no longer pending, skipping confirmation check`);
+                return;
+            }
+
+            this.sessionStats.confirmationChecks++;
+            logger.info(`🔍 Checking confirmation for ${position.symbol}: ${txHash}`);
+            
+            // Check transaction status on-chain
+            const confirmed = await this.isTransactionConfirmed(txHash);
+            
+            if (confirmed) {
+                logger.info(`✅ Transaction confirmed: ${txHash}`);
+                this.sessionStats.confirmationSuccesses++;
+                
+                // Calculate final results
+                const tokenAmount = position.pendingTokenAmount;
+                const originalInvestment = (tokenAmount / parseFloat(position.quantity)) * position.investedAmount;
+                const pnl = confirmed.solReceived - originalInvestment;
+                
+                await this.completeSell(positionId, {
+                    tokenAmount,
+                    solReceived: confirmed.solReceived,
+                    pnl,
+                    signature: txHash,
+                    reason: position.pendingReason
+                });
+                
+                this.sessionStats.liveSellsExecuted++;
+                this.sessionStats.sessionPnL += pnl;
+                
+            } else {
+                logger.warn(`⚠️ Transaction not confirmed: ${txHash}`);
+                this.sessionStats.confirmationFailures++;
+                
+                // Increment retry count and retry or move to manual review
+                position.retryCount = (position.retryCount || 0) + 1;
+                this.sessionStats.retryAttempts++;
+                
+                if (position.retryCount >= this.config.maxRetries) {
+                    await this.moveToManualReview(position, `Transaction not confirmed after ${this.config.maxRetries} attempts`);
+                } else {
+                    // Reset position for retry
+                    position.status = 'ACTIVE';
+                    position.lastRetryReason = 'Transaction not confirmed';
+                    this.positions.set(positionId, position);
+                    await this.savePositions();
+                    
+                    logger.info(`🔄 Retrying sell for ${position.symbol} (attempt ${position.retryCount + 1}/${this.config.maxRetries})`);
+                    
+                    // Trigger another sell attempt after a short delay
+                    setTimeout(() => {
+                        this.executePumpSwapSell(position, position.pendingSellPercentage, position.pendingReason);
+                    }, 2000);
+                }
+            }
+            
+        } catch (error) {
+            logger.error(`❌ Confirmation check failed for ${positionId}: ${error.message}`);
+            this.sessionStats.confirmationFailures++;
+            
+            const position = this.positions.get(positionId);
+            if (position) {
+                await this.moveToManualReview(position, `Confirmation check error: ${error.message}`);
+            }
+        }
+    }
+
+ // Check if transaction is confirmed on blockchain - FIXED for versioned transactions
+ async isTransactionConfirmed(txHash) {
+    try {
+        if (!this.tradingBot?.pumpSwapService?.connection) {
+            throw new Error('No connection available');
+        }
+
+        const connection = this.tradingBot.pumpSwapService.connection;
+        
+        // 🔥 FIX: Add maxSupportedTransactionVersion for versioned transactions
+        const status = await connection.getSignatureStatus(txHash, {
+            searchTransactionHistory: true
+        });
+        
+        if (status?.value?.confirmationStatus === 'confirmed' || 
+            status?.value?.confirmationStatus === 'finalized') {
+            
+            // 🔥 FIX: Add maxSupportedTransactionVersion to getTransaction
+            const txDetails = await connection.getTransaction(txHash, {
+                commitment: 'confirmed',
+                maxSupportedTransactionVersion: 0  // Support versioned transactions
+            });
+            
+            if (txDetails) {
+                // Extract actual SOL received from transaction
+                const solReceived = this.extractSolFromTransaction(txDetails);
+                return { confirmed: true, solReceived };
+            }
+            
+            // If we can't get transaction details but status is confirmed, assume success
+            logger.warn(`Transaction confirmed but couldn't get details: ${txHash}`);
+            return { confirmed: true, solReceived: 0 };
+        }
+        
+        return false;
+        
+    } catch (error) {
+        logger.error(`Transaction confirmation check failed: ${error.message}`);
+        return false;
+    }
+}
+
+    // Extract SOL received from transaction details
+    extractSolFromTransaction(txDetails) {
+        try {
+            // This would need to be implemented based on your transaction structure
+            // For now, return estimated amount based on current price
+            const postBalances = txDetails.meta?.postBalances || [];
+            const preBalances = txDetails.meta?.preBalances || [];
+            
+            // Calculate SOL difference (simplified)
+            if (postBalances.length > 0 && preBalances.length > 0) {
+                const solDiff = (postBalances[0] - preBalances[0]) / 1e9;
+                return Math.abs(solDiff);
+            }
+            
+            return 0;
+        } catch (error) {
+            logger.error('Failed to extract SOL from transaction:', error.message);
+            return 0;
+        }
+    }
+
+    async completeSell(positionId, sellData) {
+        const position = this.positions.get(positionId);
+        if (!position) return;
+
+        const originalQuantity = parseFloat(position.quantity);
+        const currentRemainingQuantity = parseFloat(position.remainingQuantity);
+        const soldQuantity = sellData.tokenAmount;
+        const newRemainingQuantity = currentRemainingQuantity - soldQuantity;
+        
+        // Calculate what percentage of original position was sold
+        const soldPercentage = (soldQuantity / originalQuantity) * 100;
+        const remainingPercentage = (newRemainingQuantity / originalQuantity) * 100;
+        
+        logger.info(`📊 SELL COMPLETED: ${position.symbol}`);
+        logger.info(`   Sold: ${soldQuantity.toFixed(6)} tokens (${soldPercentage.toFixed(1)}% of original)`);
+        logger.info(`   Remaining: ${newRemainingQuantity.toFixed(6)} tokens (${remainingPercentage.toFixed(1)}% of original)`);
+        logger.info(`   PnL: ${sellData.pnl.toFixed(6)} SOL`);
+        
+        // 🔥 FIXED: Check if this is a partial sell or full close
+        if (newRemainingQuantity > 0.001) { // Keep some buffer for floating point precision
+            // PARTIAL SELL - Keep position active
+            const updatedPosition = {
+                ...position,
+                remainingQuantity: newRemainingQuantity.toString(),
+                status: 'ACTIVE', // 🔥 RESET TO ACTIVE for partial sells
+                totalRealizedPnL: (position.totalRealizedPnL || 0) + sellData.pnl,
+                partialSells: (position.partialSells || []).concat({
+                    timestamp: Date.now(),
+                    soldQuantity: soldQuantity,
+                    solReceived: sellData.solReceived,
+                    pnl: sellData.pnl,
+                    reason: sellData.reason,
+                    signature: sellData.signature,
+                    soldPercentage: soldPercentage
+                }),
+                updatedAt: Date.now(),
+                lastSellAt: Date.now()
+            };
+            
+            this.positions.set(positionId, updatedPosition);
+            await this.savePositions();
+            
+            logger.info(`🔄 PARTIAL SELL COMPLETED: ${position.symbol} - ${remainingPercentage.toFixed(1)}% position remaining [ACTIVE]`);
+            
+            this.emit('partialSell', {
+                position: updatedPosition,
+                sellData: sellData,
+                remainingPercentage: remainingPercentage
+            });
+            
+        } else {
+            // FULL CLOSE - Move to trade history
+            const finalPosition = {
+                ...position,
+                remainingQuantity: "0",
+                status: 'CLOSED',
+                closedAt: Date.now(),
+                closeReason: sellData.reason,
+                finalTxHash: sellData.signature,
+                solReceived: sellData.solReceived,
+                finalPnL: (position.totalRealizedPnL || 0) + sellData.pnl,
+                updatedAt: Date.now()
+            };
+
+            // Move to trade history and remove from active
+            await this.movePositionToHistory(finalPosition);
+            this.positions.delete(positionId);
+            await this.savePositions();
+            
+            logger.info(`✅ POSITION FULLY CLOSED: ${position.symbol} - Total PnL: ${finalPosition.finalPnL.toFixed(6)} SOL`);
+            
+            this.emit('positionClosed', finalPosition);
+        }
+    }
+
+    // Move position to manual review in trade history
+    async moveToManualReview(position, reason) {
+        position.status = 'MANUAL_REVIEW_NEEDED';
+        position.reviewReason = reason;
+        position.reviewCreatedAt = Date.now();
+        
+        // Move to trade history for manual review
+        await this.movePositionToHistory(position);
+        this.positions.delete(position.id);
+        
+        await this.savePositions();
+        
+        this.sessionStats.manualReviewCount++;
+        
+        logger.error(`⚠️ MANUAL REVIEW NEEDED: ${position.symbol} - ${reason}`);
+        
+        this.emit('manualReviewNeeded', position);
+    }
+
+    // Enhanced stop loss check that respects pending status
     async checkStopLossWithLiveExecution(position) {
         if (!position.stopLossPrice || !position.currentPrice) return;
+        if (position.status !== 'ACTIVE') return; // Don't trigger if pending
         
         if (position.currentPrice <= position.stopLossPrice) {
             const lossPercent = ((position.currentPrice - position.entryPrice) / position.entryPrice * 100);
@@ -324,46 +705,28 @@ class PositionManager extends EventEmitter {
             logger.warn(`🛑 STOP LOSS TRIGGERED: ${position.symbol} at ${position.currentPrice.toFixed(8)} SOL (${lossPercent.toFixed(1)}%)`);
             
             try {
-                if (this.tradingBot.config.tradingMode === 'live') {
-                    const sellResult = await this.tradingBot.executePumpSwapSell(
-                        position, 
-                        100,
-                        `Stop Loss (${lossPercent.toFixed(1)}%)`
-                    );
-                    
-                    if (sellResult.success) {
-                        logger.info(`✅ LIVE STOP LOSS EXECUTED: ${sellResult.solReceived.toFixed(6)} SOL received`);
-                        this.sessionStats.liveSellsExecuted++;
-                        this.sessionStats.stopLossExecutions++;
-                        this.sessionStats.sessionPnL += sellResult.pnl;
-                    }
-                } else {
-                    await this.simulatePartialSell(position, 100, `Stop Loss (${lossPercent.toFixed(1)}%)`);
-                    this.sessionStats.paperSellsExecuted++;
-                    this.sessionStats.stopLossExecutions++;
-                }
-                
+                await this.executePumpSwapSell(position, 100, `Stop Loss (${lossPercent.toFixed(1)}%)`);
                 this.sessionStats.stopLossTriggered++;
+                this.sessionStats.stopLossExecutions++;
                 
                 this.emit('stopLossTriggered', {
                     position: position,
                     triggerPrice: position.currentPrice,
                     lossPercentage: Math.abs(lossPercent),
                     priceSource: position.lastPriceSource,
-                    executionMode: this.tradingBot.config.tradingMode
+                    executionMode: this.config.tradingMode
                 });
                 
             } catch (error) {
                 logger.error(`❌ Stop loss execution failed for ${position.symbol}: ${error.message}`);
-                position.status = 'STOP_LOSS_FAILED';
-                position.errorMessage = error.message;
             }
         }
     }
 
-    // Check take profits with LIVE execution
+    // Enhanced take profit check that respects pending status
     async checkTakeProfitsWithLiveExecution(position) {
         if (!position.takeProfitLevels || !position.currentPrice) return;
+        if (position.status !== 'ACTIVE') return; // Don't trigger if pending
         
         for (const tp of position.takeProfitLevels) {
             if (tp.triggered || !tp.targetPrice) continue;
@@ -376,26 +739,9 @@ class PositionManager extends EventEmitter {
                 tp.triggered = true;
                 
                 try {
-                    if (this.tradingBot.config.tradingMode === 'live') {
-                        const sellResult = await this.tradingBot.executePumpSwapSell(
-                            position, 
-                            tp.sellPercentage,
-                            `Take Profit ${tp.level} (+${gainPercent.toFixed(1)}%)`
-                        );
-                        
-                        if (sellResult.success) {
-                            logger.info(`✅ LIVE TAKE PROFIT ${tp.level} EXECUTED: ${sellResult.solReceived.toFixed(6)} SOL received`);
-                            this.sessionStats.liveSellsExecuted++;
-                            this.sessionStats.takeProfitExecutions++;
-                            this.sessionStats.sessionPnL += sellResult.pnl;
-                        }
-                    } else {
-                        await this.simulatePartialSell(position, tp.sellPercentage, `Take Profit ${tp.level} (+${gainPercent.toFixed(1)}%)`);
-                        this.sessionStats.paperSellsExecuted++;
-                        this.sessionStats.takeProfitExecutions++;
-                    }
-                    
+                    await this.executePumpSwapSell(position, tp.sellPercentage, `Take Profit ${tp.level} (+${gainPercent.toFixed(1)}%)`);
                     this.sessionStats.takeProfitTriggered++;
+                    this.sessionStats.takeProfitExecutions++;
                     
                     this.emit('takeProfitTriggered', {
                         position: position,
@@ -404,20 +750,18 @@ class PositionManager extends EventEmitter {
                         gainPercentage: gainPercent,
                         sellPercentage: tp.sellPercentage,
                         priceSource: position.lastPriceSource,
-                        executionMode: this.tradingBot.config.tradingMode
+                        executionMode: this.config.tradingMode
                     });
                     
                 } catch (error) {
                     logger.error(`❌ Take profit ${tp.level} execution failed for ${position.symbol}: ${error.message}`);
-                    tp.triggered = false;
-                    tp.status = 'EXECUTION_FAILED';
-                    tp.errorMessage = error.message;
+                    tp.triggered = false; // Reset on error
                 }
             }
         }
     }
 
-    // Add new position (enhanced with price source tracking)
+    // Add new position
     async addPosition(position) {
         this.validatePosition(position);
         
@@ -428,7 +772,7 @@ class PositionManager extends EventEmitter {
         const enhancedPosition = {
             ...position,
             createdAt: Date.now(),
-            status: 'ACTIVE',
+            status: 'ACTIVE', // Always start as ACTIVE
             currentPrice: position.entryPrice,
             currentValue: position.investedAmount,
             unrealizedPnL: 0,
@@ -439,21 +783,14 @@ class PositionManager extends EventEmitter {
                 timestamp: Date.now(),
                 price: position.entryPrice,
                 source: 'entry'
-            }]
+            }],
+            retryCount: 0
         };
         
         this.positions.set(position.id, enhancedPosition);
         await this.savePositions();
         
-        logger.info(`📈 Position created: ${position.symbol}`);
-        logger.debug(`   Position details: ${JSON.stringify({
-            tokenAddress: position.tokenAddress,
-            poolAddress: position.poolAddress,
-            migrationPool: position.migrationPool,
-            priceSource: position.priceSource,
-            eventType: position.eventType,
-            isMigration: position.isMigration
-        }, null, 2)}`);
+        logger.info(`📈 Position created: ${position.symbol} [ACTIVE]`);
         
         const priceSourceInfo = position.priceSource ? ` (${position.priceSource})` : '';
         const tradingModeInfo = position.paperTrade ? ' [PAPER]' : ' [LIVE]';
@@ -470,70 +807,7 @@ class PositionManager extends EventEmitter {
         return enhancedPosition;
     }
 
-    // Simulate partial sell for paper trading
-    async simulatePartialSell(position, sellPercentage, reason) {
-        const sellQuantity = (parseFloat(position.remainingQuantity) * sellPercentage / 100);
-        const soldValue = sellQuantity * position.currentPrice;
-        const originalInvestment = (sellQuantity / parseFloat(position.quantity)) * position.investedAmount;
-        const pnl = soldValue - originalInvestment;
-        
-        logger.info(`📝 Paper sell: ${sellQuantity.toFixed(6)} ${position.symbol} for ${soldValue.toFixed(6)} SOL`);
-        logger.info(`📊 Paper PnL: ${pnl > 0 ? '+' : ''}${pnl.toFixed(6)} SOL (${((pnl / originalInvestment) * 100).toFixed(2)}%)`);
-        
-        await this.updatePositionAfterSell(
-            position.id,
-            sellQuantity,
-            soldValue,
-            pnl,
-            'PAPER_SELL_' + Date.now(),
-            reason
-        );
-    }
-
-    // 🔥 NEW: Update position after sell - handles moving to trade history
-    async updatePositionAfterSell(positionId, sellQuantity, soldValue, pnl, txHash, reason = 'Manual') {
-        const position = this.positions.get(positionId);
-        if (!position) throw new Error(`Position ${positionId} not found`);
-
-        const newRemainingQuantity = parseFloat(position.remainingQuantity) - sellQuantity;
-
-        const updatedPosition = {
-            ...position,
-            remainingQuantity: newRemainingQuantity.toString(),
-            updatedAt: Date.now()
-        };
-
-        // If position is fully closed, move to trade history
-        if (newRemainingQuantity <= 0.001) {
-            updatedPosition.status = 'CLOSED';
-            updatedPosition.closedAt = Date.now();
-            updatedPosition.closeReason = reason;
-            updatedPosition.finalPnL = pnl;
-            updatedPosition.exitTxHash = txHash;
-
-            // 🔥 MOVE TO TRADE HISTORY instead of keeping in positions
-            await this.movePositionToHistory(updatedPosition);
-            
-            // Remove from active positions
-            this.positions.delete(positionId);
-
-            const priceSourceInfo = position.lastPriceSource ? ` (${position.lastPriceSource})` : '';
-            const tradingModeInfo = position.paperTrade ? ' [PAPER]' : ' [LIVE]';
-            
-            logger.info(`📉 CLOSED: ${position.symbol} - PnL: ${pnl.toFixed(4)} SOL${priceSourceInfo}${tradingModeInfo}`);
-            this.emit('positionClosed', updatedPosition);
-        } else {
-            // Partial sell - keep in active positions
-            this.positions.set(positionId, updatedPosition);
-            logger.info(`📊 SOLD: ${sellQuantity.toFixed(6)} ${position.symbol} - ${newRemainingQuantity.toFixed(2)} remaining`);
-            this.emit('positionUpdated', updatedPosition);
-        }
-
-        await this.savePositions();
-        return updatedPosition;
-    }
-
-    // 🔥 NEW: Move completed position to trade history
+    // Move completed position to trade history
     async movePositionToHistory(closedPosition) {
         try {
             // Create simplified trade record
@@ -541,22 +815,26 @@ class PositionManager extends EventEmitter {
                 id: closedPosition.id,
                 tokenAddress: closedPosition.tokenAddress,
                 symbol: closedPosition.symbol,
-                entryTime: closedPosition.entryTime,
-                exitTime: closedPosition.closedAt,
+                entryTime: closedPosition.entryTime || closedPosition.createdAt,
+                exitTime: closedPosition.closedAt || Date.now(),
                 entryPrice: closedPosition.entryPrice,
                 exitPrice: closedPosition.currentPrice || closedPosition.entryPrice,
                 quantity: closedPosition.quantity,
                 investedAmount: closedPosition.investedAmount,
-                pnl: closedPosition.finalPnL,
-                pnlPercentage: ((closedPosition.finalPnL / closedPosition.investedAmount) * 100),
-                exitReason: closedPosition.closeReason,
-                duration: closedPosition.closedAt - closedPosition.entryTime,
+                pnl: closedPosition.finalPnL || 0,
+                pnlPercentage: closedPosition.finalPnL ? 
+                    ((closedPosition.finalPnL / closedPosition.investedAmount) * 100) : 0,
+                exitReason: closedPosition.closeReason || closedPosition.reviewReason,
+                duration: (closedPosition.closedAt || Date.now()) - (closedPosition.entryTime || closedPosition.createdAt),
                 tradingMode: closedPosition.paperTrade ? 'paper' : 'live',
                 entryTxHash: closedPosition.txHash,
-                exitTxHash: closedPosition.exitTxHash,
+                exitTxHash: closedPosition.finalTxHash,
                 eventType: closedPosition.eventType,
                 twitterLikes: closedPosition.alert?.twitter?.likes,
-                priceSource: closedPosition.lastPriceSource
+                priceSource: closedPosition.lastPriceSource,
+                status: closedPosition.status, // CLOSED or MANUAL_REVIEW_NEEDED
+                retryCount: closedPosition.retryCount || 0,
+                reviewReason: closedPosition.reviewReason
             };
 
             // Load existing trade history
@@ -582,18 +860,24 @@ class PositionManager extends EventEmitter {
             tradesHistory.trades.push(trade);
             
             // Update summary
-            tradesHistory.summary.totalTrades = tradesHistory.trades.length;
-            tradesHistory.summary.totalPnL = tradesHistory.trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-            const profitableTrades = tradesHistory.trades.filter(t => (t.pnl || 0) > 0).length;
-            tradesHistory.summary.winRate = tradesHistory.trades.length > 0 ? 
-                (profitableTrades / tradesHistory.trades.length * 100) : 0;
+            const closedTrades = tradesHistory.trades.filter(t => t.status === 'CLOSED');
+            tradesHistory.summary.totalTrades = closedTrades.length;
+            tradesHistory.summary.totalPnL = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+            const profitableTrades = closedTrades.filter(t => (t.pnl || 0) > 0).length;
+            tradesHistory.summary.winRate = closedTrades.length > 0 ? 
+                (profitableTrades / closedTrades.length * 100) : 0;
             tradesHistory.summary.lastUpdated = new Date().toISOString();
+            
+            // Count manual reviews
+            const manualReviews = tradesHistory.trades.filter(t => t.status === 'MANUAL_REVIEW_NEEDED').length;
+            tradesHistory.summary.manualReviews = manualReviews;
 
             // Save trade history
             const historyPath = path.resolve(this.config.tradesHistoryFile);
             await fs.writeFile(historyPath, JSON.stringify(tradesHistory, null, 2));
             
-            logger.info(`💾 Trade moved to history: ${closedPosition.symbol} (${tradesHistory.trades.length} total trades)`);
+            const statusText = closedPosition.status === 'MANUAL_REVIEW_NEEDED' ? 'for manual review' : 'as closed';
+            logger.info(`💾 Trade moved to history ${statusText}: ${closedPosition.symbol} (${tradesHistory.trades.length} total)`);
             
         } catch (error) {
             logger.error('❌ Failed to move position to trade history:', error.message);
@@ -601,50 +885,10 @@ class PositionManager extends EventEmitter {
         }
     }
 
-    // Close position completely
-    async closePosition(positionId, reason = 'Manual Close') {
-        const position = this.positions.get(positionId);
-        if (!position) throw new Error(`Position ${positionId} not found`);
-        
-        const remainingQuantity = parseFloat(position.remainingQuantity);
-        const currentValue = remainingQuantity * (position.currentPrice || position.entryPrice);
-        const originalInvestment = (remainingQuantity / parseFloat(position.quantity)) * position.investedAmount;
-        const finalPnL = currentValue - originalInvestment;
-        
-        if (this.tradingBot.config.tradingMode === 'live') {
-            try {
-                const sellResult = await this.tradingBot.executePumpSwapSell(position, 100, reason);
-                if (sellResult.success) {
-                    logger.info(`✅ LIVE POSITION CLOSED: ${position.symbol} - ${sellResult.solReceived.toFixed(6)} SOL received`);
-                    this.sessionStats.liveSellsExecuted++;
-                    this.sessionStats.sessionPnL += sellResult.pnl;
-                }
-            } catch (error) {
-                logger.error(`❌ Live position close failed for ${position.symbol}: ${error.message}`);
-                await this.updatePositionAfterSell(
-                    positionId,
-                    remainingQuantity,
-                    currentValue,
-                    finalPnL,
-                    'MANUAL_CLOSE_' + Date.now(),
-                    reason + ' (Live close failed)'
-                );
-            }
-        } else {
-            await this.updatePositionAfterSell(
-                positionId,
-                remainingQuantity,
-                currentValue,
-                finalPnL,
-                'PAPER_CLOSE_' + Date.now(),
-                reason
-            );
-        }
-    }
-
-    // Get enhanced performance summary
+    // Get performance summary
     getPerformanceStats() {
-        const activePositions = Array.from(this.positions.values());
+        const activePositions = this.getActivePositions();
+        const pendingPositions = this.getPendingPositions();
         
         const totalInvested = activePositions.reduce((sum, pos) => {
             const ratio = parseFloat(pos.remainingQuantity) / parseFloat(pos.quantity);
@@ -654,43 +898,43 @@ class PositionManager extends EventEmitter {
         const totalUnrealizedPnL = activePositions.reduce((sum, pos) => sum + (pos.unrealizedPnL || 0), 0);
 
         // Calculate price source distribution
-        const poolBasedPositions = activePositions.filter(pos => pos.lastPriceSource === 'pool_based').length;
-        const fallbackPositions = activePositions.filter(pos => pos.lastPriceSource === 'fallback').length;
+        const allPositions = [...activePositions, ...pendingPositions];
+        const poolBasedPositions = allPositions.filter(pos => pos.lastPriceSource === 'pool_based').length;
+        const fallbackPositions = allPositions.filter(pos => pos.lastPriceSource === 'fallback').length;
 
         return {
             activePositions: activePositions.length,
+            pendingPositions: pendingPositions.length,
+            totalPositions: this.positions.size,
             totalInvested: totalInvested.toFixed(4) + ' SOL',
             totalUnrealizedPnL: totalUnrealizedPnL.toFixed(4) + ' SOL',
+            availableSlots: this.config.maxPositions - this.positions.size,
             
-            // Session stats only
+            // Session stats
             sessionStats: {
-                priceUpdates: this.sessionStats.priceUpdates,
-                poolBasedUpdates: this.sessionStats.poolBasedPriceUpdates,
-                fallbackUpdates: this.sessionStats.fallbackPriceUpdates,
-                failures: this.sessionStats.priceUpdateFailures,
-                stopLossTriggered: this.sessionStats.stopLossTriggered,
-                takeProfitTriggered: this.sessionStats.takeProfitTriggered,
-                liveSells: this.sessionStats.liveSellsExecuted,
-                paperSells: this.sessionStats.paperSellsExecuted,
-                sessionPnL: this.sessionStats.sessionPnL.toFixed(6) + ' SOL'
+                ...this.sessionStats,
+                sessionPnL: this.sessionStats.sessionPnL.toFixed(6) + ' SOL',
+                confirmationRate: this.sessionStats.confirmationChecks > 0 ? 
+                    ((this.sessionStats.confirmationSuccesses / this.sessionStats.confirmationChecks) * 100).toFixed(1) + '%' : '0%'
             },
             
             currentPriceSources: {
                 poolBased: poolBasedPositions,
                 fallback: fallbackPositions,
-                unknown: activePositions.length - poolBasedPositions - fallbackPositions
+                unknown: allPositions.length - poolBasedPositions - fallbackPositions
             }
         };
     }
 
-    // 🔥 UPDATED: Save only active positions (no closed positions)
+    // Save only active and pending positions
     async savePositions() {
         try {
             const data = {
                 active: Object.fromEntries(this.positions),
                 sessionStats: this.sessionStats,
                 priceUpdateStats: this.priceUpdateStats,
-                lastSaved: new Date().toISOString()
+                lastSaved: new Date().toISOString(),
+                positionCount: this.positions.size
             };
             
             await fs.writeFile(path.resolve(this.config.positionsFile), JSON.stringify(data, null, 2));
@@ -699,7 +943,7 @@ class PositionManager extends EventEmitter {
         }
     }
 
-    // 🔥 UPDATED: Load only active positions
+    // Load only active and pending positions
     async loadPositions() {
         try {
             const data = await fs.readFile(path.resolve(this.config.positionsFile), 'utf8');
@@ -715,7 +959,10 @@ class PositionManager extends EventEmitter {
                 this.sessionStats = { ...this.sessionStats, ...savedData.sessionStats };
             }
             
-            logger.info(`📊 Loaded ${this.positions.size} active positions`);
+            const activeCount = this.getActivePositions().length;
+            const pendingCount = this.getPendingPositions().length;
+            
+            logger.info(`📊 Loaded ${this.positions.size} positions (${activeCount} active, ${pendingCount} pending)`);
             
         } catch (error) {
             if (error.code !== 'ENOENT') {
@@ -733,104 +980,63 @@ class PositionManager extends EventEmitter {
         if (parseFloat(position.investedAmount) <= 0) throw new Error('Investment must be > 0');
     }
 
-    // Helper methods
+    // Helper methods - filter by status
     hasPosition(tokenAddress) {
         return Array.from(this.positions.values()).some(pos => pos.tokenAddress === tokenAddress);
     }
 
     getActivePositions() {
+        return Array.from(this.positions.values()).filter(pos => pos.status === 'ACTIVE');
+    }
+
+    getPendingPositions() {
+        return Array.from(this.positions.values()).filter(pos => pos.status === 'PENDING_SELL');
+    }
+
+    getAllPositions() {
         return Array.from(this.positions.values());
     }
 
     getActivePositionsCount() {
-        return this.positions.size;
+        return this.getActivePositions().length;
     }
 
-    // Get detailed position info with price history
-    getPositionDetails(positionId) {
-        const position = this.positions.get(positionId);
-        
-        if (!position) {
-            return null;
-        }
-
-        return {
-            ...position,
-            priceHistory: position.priceHistory || [],
-            priceSourceDistribution: this.calculatePriceSourceDistribution(position.priceHistory || [])
-        };
-    }
-
-    // Calculate price source distribution for a position
-    calculatePriceSourceDistribution(priceHistory) {
-        const sources = priceHistory.reduce((acc, update) => {
-            acc[update.source] = (acc[update.source] || 0) + 1;
-            return acc;
-        }, {});
-
-        const total = priceHistory.length;
-        const distribution = {};
-        
-        for (const [source, count] of Object.entries(sources)) {
-            distribution[source] = {
-                count: count,
-                percentage: total > 0 ? ((count / total) * 100).toFixed(1) + '%' : '0%'
-            };
-        }
-
-        return distribution;
-    }
-
-    // Manual position close (for emergency situations)
+    // Manual intervention methods
     async forceClosePosition(positionId, reason = 'Force Close') {
         const position = this.positions.get(positionId);
         if (!position) throw new Error(`Position ${positionId} not found`);
         
         logger.warn(`⚠️ Force closing position: ${position.symbol} - ${reason}`);
         
-        try {
-            await this.closePosition(positionId, reason);
-            logger.info(`✅ Position ${position.symbol} force closed successfully`);
-        } catch (error) {
-            logger.error(`❌ Force close failed for ${position.symbol}: ${error.message}`);
-            
-            position.status = 'FORCE_CLOSE_FAILED';
-            position.errorMessage = error.message;
-            position.closeReason = reason;
-            this.positions.set(positionId, position);
-            await this.savePositions();
-            
-            throw error;
-        }
-    }
-
-    // Get positions by status
-    getPositionsByStatus(status) {
-        return Array.from(this.positions.values()).filter(pos => pos.status === status);
-    }
-
-    // Get failed positions that need manual intervention
-    getFailedPositions() {
-        return Array.from(this.positions.values()).filter(pos => 
-            pos.status?.includes('FAILED') || 
-            pos.takeProfitLevels?.some(tp => tp.status === 'EXECUTION_FAILED')
-        );
+        // Force move to closed status
+        position.status = 'CLOSED';
+        position.closedAt = Date.now();
+        position.closeReason = reason;
+        position.forceClosed = true;
+        position.finalPnL = position.unrealizedPnL || 0;
+        
+        await this.movePositionToHistory(position);
+        this.positions.delete(positionId);
+        
+        await this.savePositions();
+        
+        logger.warn(`⚠️ FORCE CLOSED: ${position.symbol} - ${reason}`);
     }
 
     // Emergency stop all positions
     async emergencyStopAllPositions(reason = 'Emergency Stop') {
-        const activePositions = this.getActivePositions();
+        const allPositions = this.getAllPositions();
         
-        if (activePositions.length === 0) {
-            logger.info('No active positions to stop');
+        if (allPositions.length === 0) {
+            logger.info('No positions to stop');
             return;
         }
         
-        logger.warn(`🚨 EMERGENCY STOP: Closing ${activePositions.length} active positions - ${reason}`);
+        logger.warn(`🚨 EMERGENCY STOP: Processing ${allPositions.length} positions - ${reason}`);
         
         const results = [];
         
-        for (const position of activePositions) {
+        for (const position of allPositions) {
             try {
                 await this.forceClosePosition(position.id, reason);
                 results.push({ symbol: position.symbol, success: true });
@@ -847,68 +1053,6 @@ class PositionManager extends EventEmitter {
         logger.warn(`🚨 EMERGENCY STOP COMPLETE: ${successful} closed, ${failed} failed`);
         
         return results;
-    }
-
-    // Get real-time position summary
-    getRealTimePositionSummary() {
-        const activePositions = this.getActivePositions();
-        
-        if (activePositions.length === 0) {
-            return {
-                totalPositions: 0,
-                totalInvested: 0,
-                totalCurrentValue: 0,
-                totalUnrealizedPnL: 0,
-                positions: []
-            };
-        }
-        
-        const summary = {
-            totalPositions: activePositions.length,
-            totalInvested: 0,
-            totalCurrentValue: 0,
-            totalUnrealizedPnL: 0,
-            positions: []
-        };
-        
-        for (const pos of activePositions) {
-            const currentPrice = pos.currentPrice || pos.entryPrice;
-            const remainingTokens = parseFloat(pos.remainingQuantity);
-            const currentValue = remainingTokens * currentPrice;
-            const investedValue = (remainingTokens / parseFloat(pos.quantity)) * pos.investedAmount;
-            const unrealizedPnL = currentValue - investedValue;
-            const priceChange = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
-            
-            summary.totalInvested += investedValue;
-            summary.totalCurrentValue += currentValue;
-            summary.totalUnrealizedPnL += unrealizedPnL;
-            
-            summary.positions.push({
-                symbol: pos.symbol,
-                entryPrice: pos.entryPrice,
-                currentPrice: currentPrice,
-                priceChange: priceChange,
-                remainingTokens: remainingTokens,
-                investedValue: investedValue,
-                currentValue: currentValue,
-                unrealizedPnL: unrealizedPnL,
-                stopLossDistance: pos.stopLossPrice ? ((currentPrice - pos.stopLossPrice) / currentPrice * 100) : null,
-                nextTakeProfitDistance: pos.takeProfitLevels ? 
-                    this.getNextTakeProfitDistance(pos, currentPrice) : null,
-                status: pos.status,
-                tradingMode: pos.paperTrade ? 'paper' : 'live'
-            });
-        }
-        
-        return summary;
-    }
-    
-    // Helper for next take profit distance
-    getNextTakeProfitDistance(position, currentPrice) {
-        const nextTP = position.takeProfitLevels?.find(tp => !tp.triggered && tp.targetPrice > currentPrice);
-        if (!nextTP) return null;
-        
-        return ((nextTP.targetPrice - currentPrice) / currentPrice * 100);
     }
 }
 
