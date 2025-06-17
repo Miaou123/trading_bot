@@ -246,7 +246,7 @@ class TradingBot extends EventEmitter {
     async createLivePosition(alert, investmentAmount, currentPrice, tradeResult) {
         const stopLossPrice = this.calculateStopLossPrice(currentPrice);
         const takeProfitPrices = this.calculateTakeProfitPrices(currentPrice);
-
+    
         const position = {
             id: this.generatePositionId(),
             tokenAddress: alert.token.address,
@@ -263,91 +263,18 @@ class TradingBot extends EventEmitter {
             alert: alert,
             paperTrade: false,
             priceSource: 'pumpswap_service',
-            migrationPool: null,
-            poolAddress: null, // Will be derived when needed
+            migrationPool: tradeResult.poolAddress, // 🔥 FIXED: Store actual pool address from buy result
+            poolAddress: tradeResult.poolAddress, // 🔥 FIXED: Store pool address for price updates
             eventType: alert.eventType || 'creation',
             isMigration: alert.migration ? true : false,
             tradingMethod: 'pumpswap'
         };
-
+    
         if (this.positionManager) {
             await this.positionManager.addPosition(position);
         }
-
+    
         return position;
-    }
-
-    // Create paper position
-    async createPaperPosition(alert, investmentAmount, currentPrice, expectedTokens) {
-        const stopLossPrice = this.calculateStopLossPrice(currentPrice);
-        const takeProfitPrices = this.calculateTakeProfitPrices(currentPrice);
-
-        const position = {
-            id: this.generatePositionId(),
-            tokenAddress: alert.token.address,
-            symbol: alert.token.symbol,
-            side: 'LONG',
-            entryPrice: currentPrice,
-            quantity: expectedTokens.toString(),
-            investedAmount: investmentAmount,
-            entryTime: Date.now(),
-            txHash: 'PAPER_TRADE_' + Date.now(),
-            stopLossPrice: stopLossPrice,
-            takeProfitLevels: takeProfitPrices,
-            remainingQuantity: expectedTokens.toString(),
-            alert: alert,
-            paperTrade: true,
-            priceSource: 'pumpswap_service',
-            migrationPool: null,
-            poolAddress: null, // Will be derived when needed
-            eventType: alert.eventType || 'creation',
-            isMigration: alert.migration ? true : false,
-            tradingMethod: 'pumpswap'
-        };
-
-        if (this.positionManager) {
-            await this.positionManager.addPosition(position);
-        }
-
-        return position;
-    }
-
-    // Simulate paper sell
-    async simulatePaperSell(position, sellPercentage, reason) {
-        const tokenAmount = parseFloat(position.remainingQuantity) * (sellPercentage / 100);
-        const currentPrice = position.currentPrice || position.entryPrice;
-        const solReceived = tokenAmount * currentPrice;
-        const originalInvestment = (tokenAmount / parseFloat(position.quantity)) * position.investedAmount;
-        const pnl = solReceived - originalInvestment;
-        const pnlPercentage = (pnl / originalInvestment) * 100;
-        
-        logger.info(`📝 Paper sell: ${tokenAmount.toFixed(6)} ${position.symbol} for ${solReceived.toFixed(6)} SOL`);
-        logger.info(`📊 Paper PnL: ${pnl > 0 ? '+' : ''}${pnl.toFixed(6)} SOL (${pnlPercentage.toFixed(2)}%)`);
-        
-        this.stats.paperTrades++;
-        this.stats.sellOrders++;
-        this.stats.totalPnL += pnl;
-        
-        if (this.positionManager) {
-            await this.positionManager.updatePositionAfterSell(
-                position.id,
-                tokenAmount,
-                solReceived,
-                pnl,
-                'PAPER_SELL_' + Date.now(),
-                reason
-            );
-        }
-        
-        return {
-            success: true,
-            signature: 'PAPER_SELL_' + Date.now(),
-            tokensSold: tokenAmount,
-            solReceived: solReceived,
-            pnl: pnl,
-            pnlPercentage: pnlPercentage,
-            method: 'simulated'
-        };
     }
 
     // Calculate stop loss price

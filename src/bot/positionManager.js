@@ -603,7 +603,7 @@ class PositionManager extends EventEmitter {
     async completeSell(positionId, sellData) {
         const position = this.positions.get(positionId);
         if (!position) return;
-
+    
         const originalQuantity = parseFloat(position.quantity);
         const currentRemainingQuantity = parseFloat(position.remainingQuantity);
         const soldQuantity = sellData.tokenAmount;
@@ -618,13 +618,16 @@ class PositionManager extends EventEmitter {
         logger.info(`   Remaining: ${newRemainingQuantity.toFixed(6)} tokens (${remainingPercentage.toFixed(1)}% of original)`);
         logger.info(`   PnL: ${sellData.pnl.toFixed(6)} SOL`);
         
-        // 🔥 FIXED: Check if this is a partial sell or full close
-        if (newRemainingQuantity > 0.001) { // Keep some buffer for floating point precision
-            // PARTIAL SELL - Keep position active
+        // 🔥 FIXED: Use a smaller threshold and better logic for determining if position should stay open
+        const minTokenThreshold = 0.001; // Very small threshold
+        const minPercentageThreshold = 0.1; // 0.1% minimum remaining to keep position open
+        
+        if (newRemainingQuantity > minTokenThreshold && remainingPercentage > minPercentageThreshold) {
+            // PARTIAL SELL - Keep position ACTIVE
             const updatedPosition = {
                 ...position,
                 remainingQuantity: newRemainingQuantity.toString(),
-                status: 'ACTIVE', // 🔥 RESET TO ACTIVE for partial sells
+                status: 'ACTIVE', // 🔥 CRITICAL: Reset to ACTIVE for partial sells
                 totalRealizedPnL: (position.totalRealizedPnL || 0) + sellData.pnl,
                 partialSells: (position.partialSells || []).concat({
                     timestamp: Date.now(),
@@ -636,13 +639,23 @@ class PositionManager extends EventEmitter {
                     soldPercentage: soldPercentage
                 }),
                 updatedAt: Date.now(),
-                lastSellAt: Date.now()
+                lastSellAt: Date.now(),
+                // 🔥 IMPORTANT: Clear pending status and retry info
+                pendingReason: undefined,
+                pendingSellPercentage: undefined,
+                pendingStartTime: undefined,
+                pendingTxHash: undefined,
+                pendingTokenAmount: undefined,
+                retryCount: 0,
+                lastRetryError: undefined,
+                lastRetryReason: undefined
             };
             
             this.positions.set(positionId, updatedPosition);
             await this.savePositions();
             
             logger.info(`🔄 PARTIAL SELL COMPLETED: ${position.symbol} - ${remainingPercentage.toFixed(1)}% position remaining [ACTIVE]`);
+            logger.info(`💰 Realized PnL so far: ${updatedPosition.totalRealizedPnL.toFixed(6)} SOL`);
             
             this.emit('partialSell', {
                 position: updatedPosition,
@@ -652,6 +665,8 @@ class PositionManager extends EventEmitter {
             
         } else {
             // FULL CLOSE - Move to trade history
+            const totalPnL = (position.totalRealizedPnL || 0) + sellData.pnl;
+            
             const finalPosition = {
                 ...position,
                 remainingQuantity: "0",
@@ -660,10 +675,21 @@ class PositionManager extends EventEmitter {
                 closeReason: sellData.reason,
                 finalTxHash: sellData.signature,
                 solReceived: sellData.solReceived,
-                finalPnL: (position.totalRealizedPnL || 0) + sellData.pnl,
-                updatedAt: Date.now()
+                finalPnL: totalPnL,
+                updatedAt: Date.now(),
+                // Add the final sell to partialSells array for complete history
+                partialSells: (position.partialSells || []).concat({
+                    timestamp: Date.now(),
+                    soldQuantity: soldQuantity,
+                    solReceived: sellData.solReceived,
+                    pnl: sellData.pnl,
+                    reason: sellData.reason,
+                    signature: sellData.signature,
+                    soldPercentage: soldPercentage,
+                    finalSell: true
+                })
             };
-
+    
             // Move to trade history and remove from active
             await this.movePositionToHistory(finalPosition);
             this.positions.delete(positionId);

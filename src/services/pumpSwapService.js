@@ -1,4 +1,4 @@
-// src/services/pumpSwapService.js - REAL PumpSwap trading with buy/sell execution
+// src/services/pumpSwapService.js - FIXED: Better pool derivation and debugging
 const { Connection, PublicKey, Keypair, VersionedTransaction, TransactionMessage, SystemProgram, ComputeBudgetProgram } = require('@solana/web3.js');
 const { AccountLayout, NATIVE_MINT, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 const { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } = require('@solana/spl-token');
@@ -16,6 +16,8 @@ class PumpSwapService {
         
         this.config = {
             slippageTolerance: config.slippageTolerance || 5,
+            maxRetries: config.maxRetries || 10, // 🔥 NEW: More retries for pool finding
+            retryDelay: config.retryDelay || 1000, // 🔥 NEW: 1 second between retries
             ...config
         };
 
@@ -42,7 +44,8 @@ class PumpSwapService {
             poolsDerivied: 0,
             buysExecuted: 0,
             sellsExecuted: 0,
-            errors: 0
+            errors: 0,
+            retryAttempts: 0 // 🔥 NEW: Track retry attempts
         };
     }
 
@@ -119,14 +122,78 @@ class PumpSwapService {
         }
     }
 
-    async findPool(tokenMint) {
+    // 🔥 ENHANCED: Better pool derivation with multiple methods and detailed logging
+    async findPool(tokenMint, retryAttempts = 0) {
         try {
             const mintPubkey = new PublicKey(tokenMint);
+            
+            logger.info(`🔍 POOL DERIVATION ATTEMPT ${retryAttempts + 1}/${this.config.maxRetries}`);
+            logger.info(`   Token: ${tokenMint}`);
+            
+            // 🔥 METHOD 1: Original PumpSwap derivation (most likely)
+            const method1Pool = await this.derivePoolMethod1(mintPubkey);
+            if (method1Pool) {
+                logger.info(`✅ POOL FOUND (Method 1): ${method1Pool.toString()}`);
+                return method1Pool;
+            }
+            
+            // 🔥 METHOD 2: Alternative derivation with different seeds
+            const method2Pool = await this.derivePoolMethod2(mintPubkey);
+            if (method2Pool) {
+                logger.info(`✅ POOL FOUND (Method 2): ${method2Pool.toString()}`);
+                return method2Pool;
+            }
+            
+            // 🔥 METHOD 3: Check for multiple pool indices
+            const method3Pool = await this.derivePoolWithIndices(mintPubkey);
+            if (method3Pool) {
+                logger.info(`✅ POOL FOUND (Method 3): ${method3Pool.toString()}`);
+                return method3Pool;
+            }
+            
+            logger.warn(`⚠️ Pool not found with any method (attempt ${retryAttempts + 1})`);
+            this.stats.poolsNotFound++;
+            
+            // 🔥 RETRY LOGIC: Keep trying for new migrations
+            if (retryAttempts < this.config.maxRetries - 1) {
+                this.stats.retryAttempts++;
+                logger.info(`🔄 Retrying pool derivation in ${this.config.retryDelay}ms... (${retryAttempts + 1}/${this.config.maxRetries})`);
+                
+                await new Promise(resolve => setTimeout(resolve, this.config.retryDelay));
+                return await this.findPool(tokenMint, retryAttempts + 1);
+            }
+            
+            logger.error(`❌ Pool not found after ${this.config.maxRetries} attempts`);
+            return null;
+            
+        } catch (error) {
+            this.stats.errors++;
+            logger.error('❌ Error in pool derivation:', error.message);
+            
+            // Retry on error too
+            if (retryAttempts < this.config.maxRetries - 1) {
+                this.stats.retryAttempts++;
+                logger.info(`🔄 Retrying after error in ${this.config.retryDelay}ms...`);
+                
+                await new Promise(resolve => setTimeout(resolve, this.config.retryDelay));
+                return await this.findPool(tokenMint, retryAttempts + 1);
+            }
+            
+            return null;
+        }
+    }
+
+    // 🔥 METHOD 1: Original derivation logic
+    async derivePoolMethod1(mintPubkey) {
+        try {
+            logger.debug(`🔧 Method 1: Original PumpSwap derivation`);
             
             const [poolAuthority] = PublicKey.findProgramAddressSync(
                 [Buffer.from("pool-authority"), mintPubkey.toBytes()],
                 this.PUMP_PROGRAM_ID
             );
+            
+            logger.debug(`   Pool Authority: ${poolAuthority.toString()}`);
             
             const poolIndexBuffer = Buffer.alloc(2);
             poolIndexBuffer.writeUInt16LE(0, 0);
@@ -142,21 +209,103 @@ class PumpSwapService {
                 this.PUMPSWAP_PROGRAM_ID
             );
             
+            logger.debug(`   Derived Pool: ${poolPda.toString()}`);
             this.stats.poolsDerivied++;
             
             const poolAccountInfo = await this.connection.getAccountInfo(poolPda);
             if (poolAccountInfo) {
                 this.stats.poolsFound++;
+                logger.info(`✅ Method 1 SUCCESS: Pool exists on-chain`);
                 return poolPda;
             } else {
-                logger.warn(`⚠️ Pool derived but doesn't exist on-chain`);
-                this.stats.poolsNotFound++;
+                logger.debug(`❌ Method 1: Pool derived but doesn't exist on-chain yet`);
                 return null;
             }
             
         } catch (error) {
-            this.stats.errors++;
-            logger.error('❌ Error deriving PumpSwap pool:', error.message);
+            logger.debug(`❌ Method 1 failed: ${error.message}`);
+            return null;
+        }
+    }
+
+    // 🔥 METHOD 2: Alternative seed structure
+    async derivePoolMethod2(mintPubkey) {
+        try {
+            logger.debug(`🔧 Method 2: Alternative seed derivation`);
+            
+            // Try different seed combinations
+            const alternatives = [
+                [Buffer.from("pool"), mintPubkey.toBytes(), this.WSOL_MINT.toBytes()],
+                [Buffer.from("amm"), mintPubkey.toBytes(), this.WSOL_MINT.toBytes()],
+                [Buffer.from("swap"), mintPubkey.toBytes(), this.WSOL_MINT.toBytes()]
+            ];
+            
+            for (let i = 0; i < alternatives.length; i++) {
+                const [poolPda] = PublicKey.findProgramAddressSync(
+                    alternatives[i],
+                    this.PUMPSWAP_PROGRAM_ID
+                );
+                
+                logger.debug(`   Alternative ${i + 1}: ${poolPda.toString()}`);
+                
+                const poolAccountInfo = await this.connection.getAccountInfo(poolPda);
+                if (poolAccountInfo) {
+                    this.stats.poolsFound++;
+                    logger.info(`✅ Method 2 SUCCESS: Alternative ${i + 1} exists`);
+                    return poolPda;
+                }
+            }
+            
+            logger.debug(`❌ Method 2: No alternative derivations found`);
+            return null;
+            
+        } catch (error) {
+            logger.debug(`❌ Method 2 failed: ${error.message}`);
+            return null;
+        }
+    }
+
+    // 🔥 METHOD 3: Try multiple pool indices
+    async derivePoolWithIndices(mintPubkey) {
+        try {
+            logger.debug(`🔧 Method 3: Multiple pool indices`);
+            
+            const [poolAuthority] = PublicKey.findProgramAddressSync(
+                [Buffer.from("pool-authority"), mintPubkey.toBytes()],
+                this.PUMP_PROGRAM_ID
+            );
+            
+            // Try indices 0-5
+            for (let index = 0; index <= 5; index++) {
+                const poolIndexBuffer = Buffer.alloc(2);
+                poolIndexBuffer.writeUInt16LE(index, 0);
+                
+                const [poolPda] = PublicKey.findProgramAddressSync(
+                    [
+                        Buffer.from("pool"),
+                        poolIndexBuffer,
+                        poolAuthority.toBytes(),
+                        mintPubkey.toBytes(),
+                        this.WSOL_MINT.toBytes()
+                    ],
+                    this.PUMPSWAP_PROGRAM_ID
+                );
+                
+                logger.debug(`   Index ${index}: ${poolPda.toString()}`);
+                
+                const poolAccountInfo = await this.connection.getAccountInfo(poolPda);
+                if (poolAccountInfo) {
+                    this.stats.poolsFound++;
+                    logger.info(`✅ Method 3 SUCCESS: Index ${index} exists`);
+                    return poolPda;
+                }
+            }
+            
+            logger.debug(`❌ Method 3: No indices 0-5 found`);
+            return null;
+            
+        } catch (error) {
+            logger.debug(`❌ Method 3 failed: ${error.message}`);
             return null;
         }
     }
@@ -232,6 +381,7 @@ class PumpSwapService {
         }
     }
 
+    // 🔥 ENHANCED: Buy with better pool finding and retry logic
     async executeBuy(tokenMint, solAmount, slippage = null) {
         try {
             if (!this.wallet || !this.program) {
@@ -240,10 +390,13 @@ class PumpSwapService {
 
             logger.info(`🚀 EXECUTING REAL BUY: ${solAmount} SOL → ${tokenMint}`);
 
+            // 🔥 ENHANCED: Use new pool finding with retries
             const poolAddress = await this.findPool(tokenMint);
             if (!poolAddress) {
-                throw new Error('Pool not found');
+                throw new Error(`Pool not found after ${this.config.maxRetries} attempts`);
             }
+
+            logger.info(`🏊 Using pool: ${poolAddress.toString()}`);
 
             const mintPubkey = new PublicKey(tokenMint);
             const quoteMint = this.WSOL_MINT;
@@ -299,6 +452,7 @@ class PumpSwapService {
             const baseAmountOut = new BN(Math.floor(expectedTokensOut * 1e6)); // Assuming 6 decimals
 
             logger.info(`💰 Buying: max ${solAmount} SOL for ~${(expectedTokensOut / 1e6).toFixed(2)}M tokens`);
+            logger.info(`💰 Current price: ${currentPrice.toFixed(12)} SOL per token`);
 
             const instructions = [];
 
@@ -391,6 +545,7 @@ class PumpSwapService {
 
             logger.info(`✅ BUY SUCCESS!`);
             logger.info(`   Signature: ${signature}`);
+            logger.info(`   Pool Used: ${poolAddress.toString()}`);
             logger.info(`   Explorer: https://solscan.io/tx/${signature}`);
 
             return {
@@ -398,6 +553,7 @@ class PumpSwapService {
                 signature: signature,
                 solSpent: solAmount,
                 tokensReceived: expectedTokensOut,
+                poolAddress: poolAddress.toString(), // 🔥 NEW: Return pool address
                 type: 'BUY'
             };
 
@@ -420,6 +576,8 @@ class PumpSwapService {
             if (!poolAddress) {
                 throw new Error('Pool not found');
             }
+
+            logger.info(`🏊 Using pool: ${poolAddress.toString()}`);
 
             const mintPubkey = new PublicKey(tokenMint);
             const quoteMint = this.WSOL_MINT;
@@ -532,6 +690,7 @@ class PumpSwapService {
 
             logger.info(`✅ SELL SUCCESS!`);
             logger.info(`   Signature: ${signature}`);
+            logger.info(`   Pool Used: ${poolAddress.toString()}`);
             logger.info(`   SOL Received: ~${solReceived.toFixed(6)} SOL`);
             logger.info(`   Explorer: https://solscan.io/tx/${signature}`);
 
@@ -540,6 +699,7 @@ class PumpSwapService {
                 signature: signature,
                 solReceived: solReceived,
                 tokensSpent: tokenAmount,
+                poolAddress: poolAddress.toString(), // 🔥 NEW: Return pool address
                 type: 'SELL'
             };
 
@@ -648,7 +808,9 @@ class PumpSwapService {
             ...this.stats,
             wallet: this.wallet?.publicKey.toString(),
             successRate: this.stats.poolsDerivied > 0 ? 
-                ((this.stats.poolsFound / this.stats.poolsDerivied) * 100).toFixed(1) + '%' : '0%'
+                ((this.stats.poolsFound / this.stats.poolsDerivied) * 100).toFixed(1) + '%' : '0%',
+            retrySuccessRate: this.stats.retryAttempts > 0 ?
+                ((this.stats.poolsFound / (this.stats.poolsDerivied + this.stats.retryAttempts)) * 100).toFixed(1) + '%' : 'N/A'
         };
     }
 }
