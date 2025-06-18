@@ -1,0 +1,614 @@
+{
+  "active": {
+    "pos_1750240990102_viq8rpr0a": {
+      "id": "pos_1750240990102_viq8rpr0a",
+      "tokenAddress": "5Hxr9Yc9BPWnCfjZcSkn5qEcvyweTVrm5h2xyN6mpump",
+      "symbol": "UNKNOWN",
+      "side": "LONG",
+      "entryPrice": 7.639556066075658e-7,
+      "quantity": "13089.765836533577",
+      "investedAmount": 0.01,
+      "entryTime": 1750240990102,
+      "txHash": "483SWgDP9o9XZnqs6pGPKtMebW2GGWG4ECewPstdTKP3wBuMR1LxUpaUPU44WtmsFvyyA16URN276WVjUr16dY9f",
+      "stopLossPrice": 3.819778033037829e-7,
+      "takeProfitLevels": [
+        {
+          "targetPrice": 0.0000015279112132151317,
+          "sellPercentage": 50,
+          "percentage": 100,
+          "triggered": false,
+          "level": 1
+        },
+        {
+          "targetPrice": 0.0000030558224264302634,
+          "sellPercentage": 25,
+          "percentage": 300,
+          "triggered": false,
+          "level": 2
+        },
+        {
+          "targetPrice": 0.000007639556066075658,
+          "sellPercentage": 100,
+          "percentage": 900,
+          "triggered": false,
+          "level": 3
+        }
+      ],
+      "remainingQuantity": "13089.765836533577",
+      "alert": {
+        "token": {
+          "address": "5Hxr9Yc9BPWnCfjZcSkn5qEcvyweTVrm5h2xyN6mpump",
+          "symbol": "UNKNOWN",
+          "name": "Unknown Token"
+        },
+        "twitter": {
+          "likes": 999999,
+          "url": "TESTING_MODE_NO_TWITTER_CHECK"
+        },
+        "confidence": "MEDIUM",
+        "migration": {
+          "pool": "pump-amm",
+          "signature": "4PPaA3G5eoDDiT3hwXxxjBrDdZLTV26Ui8REP82rnCVqEVubH9a4ToRE6peGBGVTURs4nj7pgajW6qk17uTNRS1u"
+        }
+      },
+      "paperTrade": false,
+      "priceSource": "pumpswap_service",
+      "migrationPool": "3QHLL7hYz6wAsxioXojS1ue6S1KarsqSRb6oUCzDnWNg",
+      "poolAddress": "3QHLL7hYz6wAsxioXojS1ue6S1KarsqSRb6oUCzDnWNg",
+      "eventType": "creation",
+      "isMigration": true,
+      "tradingMethod": "pumpswap",
+      "createdAt": 1750240990102,
+      "status": "ACTIVE",
+      "currentPrice": 3.227003674348613e-7,
+      "currentValue": 0.004224072245085681,
+      "unrealizedPnL": -0.00577592775491432,
+      "priceChange": -57.75927754914319,
+      "lastPriceUpdate": 1750246875327,
+      "lastPriceSource": "pool_based",
+      "priceHistory": [
+        {
+          "timestamp": 1750243387699,
+          "price": 4.2769256762544456e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243389543,
+          "price": 4.2789882468313587e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243390605,
+          "price": 4.2794259013761774e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243448556,
+          "price": 4.280688811609355e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243450607,
+          "price": 4.2870487820618495e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243462954,
+          "price": 4.286774968386431e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243532597,
+          "price": 4.280054945670501e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243577678,
+          "price": 4.280351972769649e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243590762,
+          "price": 4.2824186914039e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243592596,
+          "price": 4.281855246779963e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243634691,
+          "price": 4.286768641103168e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243638852,
+          "price": 4.287731641542098e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243657676,
+          "price": 4.2870992209493234e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243705740,
+          "price": 4.2825295608588905e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243708774,
+          "price": 4.283508222761851e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243709729,
+          "price": 4.2851678019009065e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243711879,
+          "price": 4.28350866079488e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243713017,
+          "price": 4.284752153167514e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243772783,
+          "price": 4.283371915711214e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243774818,
+          "price": 4.283417316621635e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243777756,
+          "price": 4.282886470286145e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243787227,
+          "price": 4.2973197801826484e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243835781,
+          "price": 4.2829152597232607e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243842830,
+          "price": 4.2227527823575766e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750243994775,
+          "price": 4.220736930289798e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244049925,
+          "price": 4.2212426166417105e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244052877,
+          "price": 4.2209415726525565e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244106894,
+          "price": 4.222590705180737e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244111900,
+          "price": 4.370266135236587e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244113957,
+          "price": 4.410054589842511e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244115890,
+          "price": 4.470075070057037e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244116962,
+          "price": 4.470250396411335e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244136133,
+          "price": 4.4667556142760766e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244142873,
+          "price": 4.463400228901061e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244168053,
+          "price": 4.464403250016336e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244168977,
+          "price": 4.4619786892672965e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244169996,
+          "price": 4.459560291812447e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244187971,
+          "price": 4.4596955582172523e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244189646,
+          "price": 4.4603425042168396e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244189964,
+          "price": 4.4609882525269113e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244245943,
+          "price": 4.398353529744684e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244246977,
+          "price": 4.340863232157154e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244247927,
+          "price": 4.341073094616081e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244250285,
+          "price": 4.283738472503304e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244252943,
+          "price": 4.2457203511692005e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244300957,
+          "price": 4.249140041528498e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244312949,
+          "price": 4.248707602924773e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244367058,
+          "price": 4.2487924581110545e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244376005,
+          "price": 4.248154329042627e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244377088,
+          "price": 4.247515017120277e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244377991,
+          "price": 4.251278439635775e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244423532,
+          "price": 4.2364358425649156e-7,
+          "source": "fallback"
+        },
+        {
+          "timestamp": 1750244435018,
+          "price": 4.2378398770773145e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244451009,
+          "price": 4.238316691362266e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244463001,
+          "price": 4.3126449036737115e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244464422,
+          "price": 4.3374476136059477e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244469616,
+          "price": 4.353280643994535e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244482013,
+          "price": 4.3657149023161523e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244483097,
+          "price": 4.3782096161682483e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244501118,
+          "price": 4.181133421437437e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244505041,
+          "price": 4.182285395648229e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244507120,
+          "price": 4.181456384239329e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244509075,
+          "price": 4.182077979617833e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244511044,
+          "price": 4.180388145758888e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244581086,
+          "price": 4.1796601964403604e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244591188,
+          "price": 4.1803746885597976e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244593820,
+          "price": 4.1830536855338735e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244669191,
+          "price": 4.1840484765251934e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244676302,
+          "price": 4.1833610764530934e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244707236,
+          "price": 4.1835836516096574e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244717166,
+          "price": 4.183564615072618e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244728170,
+          "price": 4.1762773337273055e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244732258,
+          "price": 4.172845311512532e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244850441,
+          "price": 4.1746387388353663e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244852328,
+          "price": 4.175066658041584e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244854447,
+          "price": 4.1726639417356454e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244856252,
+          "price": 4.1752373161993624e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244906254,
+          "price": 4.180439581608398e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244974281,
+          "price": 4.182396457280459e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244976315,
+          "price": 4.180306215901637e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750244986462,
+          "price": 4.1846250427955664e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245044733,
+          "price": 4.182023115766672e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245060397,
+          "price": 4.1744930115321294e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245070403,
+          "price": 4.169781303524867e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245117431,
+          "price": 3.254448378727389e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245185415,
+          "price": 3.244505529100841e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245285528,
+          "price": 3.2699494796182777e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245292502,
+          "price": 3.321649234774831e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245303356,
+          "price": 3.338967218642776e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245303493,
+          "price": 3.3563407456784856e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245425565,
+          "price": 3.342885427913391e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245644616,
+          "price": 3.339310470536489e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245742815,
+          "price": 3.343639759376084e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245866787,
+          "price": 3.3393191149249515e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750245896899,
+          "price": 3.337968691143833e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750246277022,
+          "price": 3.3557726580937627e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750246565190,
+          "price": 3.338004169245597e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750246570615,
+          "price": 3.303664544382911e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750246575162,
+          "price": 3.252485139201187e-7,
+          "source": "pool_based"
+        },
+        {
+          "timestamp": 1750246875327,
+          "price": 3.227003674348613e-7,
+          "source": "pool_based"
+        }
+      ],
+      "retryCount": 15,
+      "pendingReason": "Stop Loss (-57.8%)",
+      "pendingSellPercentage": 100,
+      "pendingStartTime": 1750246875328,
+      "lastRetryError": "Simulation failed. \nMessage: Transaction simulation failed: Error processing Instruction 3: custom program error: 0x1. \nLogs: \n[\n  \"Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA invoke [1]\",\n  \"Program log: Instruction: Sell\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]\",\n  \"Program log: Instruction: TransferChecked\",\n  \"Program log: Error: insufficient funds\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4485 of 261109 compute units\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: custom program error: 0x1\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA consumed 38737 of 295361 compute units\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA failed: custom program error: 0x1\"\n]. \nCatch the `SendTransactionError` and call `getLogs()` on it for full details.",
+      "errorMessage": "Simulation failed. \nMessage: Transaction simulation failed: Error processing Instruction 3: custom program error: 0x1. \nLogs: \n[\n  \"Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA invoke [1]\",\n  \"Program log: Instruction: Sell\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]\",\n  \"Program log: Instruction: TransferChecked\",\n  \"Program log: Error: insufficient funds\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4485 of 261109 compute units\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: custom program error: 0x1\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA consumed 38737 of 295361 compute units\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA failed: custom program error: 0x1\"\n]. \nCatch the `SendTransactionError` and call `getLogs()` on it for full details.",
+      "reviewReason": "Max retries exceeded: Simulation failed. \nMessage: Transaction simulation failed: Error processing Instruction 3: custom program error: 0x1. \nLogs: \n[\n  \"Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA invoke [1]\",\n  \"Program log: Instruction: Sell\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]\",\n  \"Program log: Instruction: TransferChecked\",\n  \"Program log: Error: insufficient funds\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4485 of 261109 compute units\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: custom program error: 0x1\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA consumed 38737 of 295361 compute units\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA failed: custom program error: 0x1\"\n]. \nCatch the `SendTransactionError` and call `getLogs()` on it for full details.",
+      "reviewCreatedAt": 1750246875709
+    }
+  },
+  "sessionStats": {
+    "stopLossTriggered": 6,
+    "takeProfitTriggered": 3,
+    "priceUpdates": 3418,
+    "poolBasedPriceUpdates": 9565,
+    "fallbackPriceUpdates": 46,
+    "priceUpdateFailures": 0,
+    "liveSellsExecuted": 9,
+    "paperSellsExecuted": 0,
+    "stopLossExecutions": 6,
+    "takeProfitExecutions": 3,
+    "sessionPnL": 0.012098389999999999,
+    "confirmationChecks": 9,
+    "confirmationSuccesses": 9,
+    "confirmationFailures": 0,
+    "retryAttempts": 15,
+    "manualReviewCount": 13
+  },
+  "priceUpdateStats": {
+    "poolBased": {
+      "attempts": 52,
+      "successes": 53,
+      "totalTime": 20560
+    },
+    "fallback": {
+      "attempts": 0,
+      "successes": 1,
+      "totalTime": 354
+    },
+    "lastUpdate": 1750243343189
+  },
+  "lastSaved": "2025-06-18T11:49:16.128Z",
+  "positionCount": 1
+}

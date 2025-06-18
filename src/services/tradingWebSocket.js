@@ -247,7 +247,7 @@ class TradingWebSocket extends EventEmitter {
     async extractTokenMetadata(tokenData) {
         const tokenAddress = tokenData.mint;
         
-        // Start with original data
+        // Start with original data - BUT handle undefined values properly
         let enhancedData = {
             ...tokenData,
             symbol: tokenData.symbol || 'UNKNOWN',
@@ -263,7 +263,7 @@ class TradingWebSocket extends EventEmitter {
                     return this.enhanceTokenDataWithMetadata(enhancedData, cached.metadata);
                 }
             }
-
+    
             // Fetch metadata if not cached
             let metadataUri = tokenData.uri;
             
@@ -275,14 +275,14 @@ class TradingWebSocket extends EventEmitter {
                 logger.debug(`[${this.connectionId}] ❌ No metadata URI found for ${tokenAddress}`);
                 return enhancedData;
             }
-
+    
             // Convert IPFS/AR links
             if (metadataUri.startsWith('ipfs://')) {
                 metadataUri = metadataUri.replace('ipfs://', 'https://ipfs.io/ipfs/');
             } else if (metadataUri.startsWith('ar://')) {
                 metadataUri = metadataUri.replace('ar://', 'https://arweave.net/');
             }
-
+    
             logger.debug(`[${this.connectionId}] 📁 Fetching metadata for symbol/name: ${metadataUri}`);
             
             const response = await this.httpClient.get(metadataUri);
@@ -317,28 +317,38 @@ class TradingWebSocket extends EventEmitter {
         let extractedSymbol = tokenData.symbol;
         let extractedName = tokenData.name;
         
+        // 🔥 BUG FIX: Check for undefined values properly
         // Try different fields for symbol
-        if (metadata.symbol && metadata.symbol !== 'UNKNOWN') {
+        if (metadata.symbol && metadata.symbol !== 'UNKNOWN' && metadata.symbol !== undefined) {
             extractedSymbol = metadata.symbol;
-        } else if (metadata.properties?.symbol) {
+        } else if (metadata.properties?.symbol && metadata.properties.symbol !== undefined) {
             extractedSymbol = metadata.properties.symbol;
         } else if (metadata.attributes) {
             const symbolAttr = metadata.attributes.find(attr => 
                 attr.trait_type?.toLowerCase() === 'symbol' || 
                 attr.key?.toLowerCase() === 'symbol'
             );
-            if (symbolAttr?.value) {
+            if (symbolAttr?.value && symbolAttr.value !== undefined) {
                 extractedSymbol = symbolAttr.value;
             }
         }
         
+        // 🔥 BUG FIX: Check for undefined values properly  
         // Try different fields for name
-        if (metadata.name && metadata.name !== 'Unknown Token') {
+        if (metadata.name && metadata.name !== 'Unknown Token' && metadata.name !== undefined) {
             extractedName = metadata.name;
-        } else if (metadata.properties?.name) {
+        } else if (metadata.properties?.name && metadata.properties.name !== undefined) {
             extractedName = metadata.properties.name;
-        } else if (metadata.title) {
+        } else if (metadata.title && metadata.title !== undefined) {
             extractedName = metadata.title;
+        }
+        
+        // 🔥 ADDITIONAL FIX: Ensure we don't set undefined values back
+        if (extractedSymbol === undefined || extractedSymbol === 'undefined') {
+            extractedSymbol = tokenData.symbol || 'UNKNOWN';
+        }
+        if (extractedName === undefined || extractedName === 'undefined') {
+            extractedName = tokenData.name || 'Unknown Token';
         }
         
         logger.debug(`[${this.connectionId}] 📊 EXTRACTED FROM METADATA:`);

@@ -1078,13 +1078,36 @@
       "status": "MANUAL_REVIEW_NEEDED",
       "retryCount": 15,
       "reviewReason": "Max retries exceeded: Simulation failed. \nMessage: Transaction simulation failed: Error processing Instruction 3: custom program error: 0x1. \nLogs: \n[\n  \"Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA invoke [1]\",\n  \"Program log: Instruction: Sell\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]\",\n  \"Program log: Instruction: TransferChecked\",\n  \"Program log: Error: insufficient funds\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4485 of 261109 compute units\",\n  \"Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: custom program error: 0x1\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA consumed 38737 of 295361 compute units\",\n  \"Program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA failed: custom program error: 0x1\"\n]. \nCatch the `SendTransactionError` and call `getLogs()` on it for full details."
+    },
+    {
+      "id": "pos_1750258565878_6c3cb7vda",
+      "tokenAddress": "FPTDZSk5XhQNSAxkJC1qDMjBF4NuqAEdKQfyX5Pnpump",
+      "symbol": "HUNTER",
+      "entryTime": 1750258565878,
+      "exitTime": 1750258604371,
+      "entryPrice": 8.383667189541708e-7,
+      "exitPrice": 4.109728942882341e-7,
+      "quantity": "83495.68084873672",
+      "investedAmount": 0.1,
+      "pnl": 0.051350377,
+      "pnlPercentage": 51.350377,
+      "exitReason": "Stop Loss (-51.0%)",
+      "duration": 38493,
+      "tradingMode": "live",
+      "entryTxHash": "5WD8fxcEx9K1Z7rAVeqcfRWKTvvDZKnaed9BaZ32xkAot9UEUnEQvH85asrctuQRU7nse97urH1ozc342okkLLkK",
+      "exitTxHash": "f2WmSmUezyZ3i3tU2k3yxQxR61nzxSV21R7g1fycaysH9C5eNJTmwqra8hxvKR9tpDkpJRbSN5B8rLJm8JsSBw1",
+      "eventType": "creation",
+      "twitterLikes": 717,
+      "priceSource": "pool_based",
+      "status": "CLOSED",
+      "retryCount": 0
     }
   ],
   "summary": {
-    "totalTrades": 30,
-    "totalPnL": -0.16183362200000004,
-    "winRate": 26.666666666666668,
-    "lastUpdated": "2025-06-18T11:41:15.709Z",
+    "totalTrades": 31,
+    "totalPnL": -0.11048324500000004,
+    "winRate": 29.03225806451613,
+    "lastUpdated": "2025-06-18T14:56:44.372Z",
     "manualReviews": 16
   }
 }

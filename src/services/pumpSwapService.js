@@ -546,7 +546,7 @@ class PumpSwapService {
                 solSpent: solAmount,
                 tokensReceived: expectedTokensOut,
                 poolAddress: poolAddress.toString(),
-                alculatedPrice: currentPrice,
+                calculatedPrice: currentPrice,
                 type: 'BUY',
                 slippageUsed: slippageToUse
             };
