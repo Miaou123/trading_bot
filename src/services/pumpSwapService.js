@@ -203,10 +203,9 @@ class PumpSwapService {
             const poolAccountInfo = await this.connection.getAccountInfo(poolPda);
             if (poolAccountInfo) {
                 this.stats.poolsFound++;
-                logger.info(`✅ Method 1 SUCCESS: Pool exists on-chain`);
                 return poolPda;
             } else {
-                logger.debug(`❌ Method 1: Pool derived but doesn't exist on-chain yet`);
+                logger.debug(`❌ Pool derived but doesn't exist on-chain yet`);
                 return null;
             }
             
@@ -369,7 +368,6 @@ class PumpSwapService {
         }
     }
 
-    // 🔥 ENHANCED: Buy with better pool finding and retry logic
     async executeBuy(tokenMint, solAmount, customSlippage = null) {
         try {
             if (!this.wallet || !this.program) {
@@ -381,8 +379,6 @@ class PumpSwapService {
             logger.info(`🚀 EXECUTING REAL BUY: ${solAmount} SOL → ${tokenMint}`);
             logger.info(`🎯 Using buy slippage: ${slippageToUse}%`);
 
-
-            // 🔥 ENHANCED: Use new pool finding with retries
             const poolAddress = await this.findPool(tokenMint);
             if (!poolAddress) {
                 throw new Error(`Pool not found after ${this.config.maxRetries} attempts`);
@@ -530,7 +526,12 @@ class PumpSwapService {
             });
             
             // Wait for confirmation
-            await this.connection.confirmTransaction(signature, 'confirmed');
+            const latestBlockhash = await this.connection.getLatestBlockhash();
+            await this.connection.confirmTransaction({
+                signature: signature,
+                blockhash: latestBlockhash.blockhash,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+            }, 'confirmed');
 
             this.stats.buysExecuted++;
 
@@ -544,7 +545,8 @@ class PumpSwapService {
                 signature: signature,
                 solSpent: solAmount,
                 tokensReceived: expectedTokensOut,
-                poolAddress: poolAddress.toString(), // 🔥 NEW: Return pool address
+                poolAddress: poolAddress.toString(),
+                alculatedPrice: currentPrice,
                 type: 'BUY',
                 slippageUsed: slippageToUse
             };
@@ -684,7 +686,12 @@ class PumpSwapService {
             });
             
             // Wait for confirmation
-            await this.connection.confirmTransaction(signature, 'confirmed');
+            const latestBlockhash = await this.connection.getLatestBlockhash();
+            await this.connection.confirmTransaction({
+                signature: signature,
+                blockhash: latestBlockhash.blockhash,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+            }, 'confirmed');
     
             this.stats.sellsExecuted++;
             const solReceived = parseFloat(expectedSolOutput.toString()) / 1e9;
