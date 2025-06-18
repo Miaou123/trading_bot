@@ -1,33 +1,29 @@
-// src/services/tradingWebSocket.js - MODIFIED: Twitter check disabled for testing
+// src/services/tradingWebSocket.js - Trading WebSocket with enhanced metadata extraction
 const WebSocket = require('ws');
-const EventEmitter = require('events');
 const axios = require('axios');
+const EventEmitter = require('events');
 const logger = require('../utils/logger');
 
 class TradingWebSocket extends EventEmitter {
     constructor(config = {}) {
         super();
+        
+        this.connectionId = Math.random().toString(36).substr(2, 9);
+        this.minLikes = config.minLikes || parseInt(process.env.MIN_TWITTER_LIKES) || 100;
+        this.botMode = config.botMode || process.env.BOT_MODE || 'both';
+        this.disableTwitterCheck = config.disableTwitterCheck || false;
+        
         this.ws = null;
         this.isConnected = false;
-        this.minLikes = config.minLikes || parseInt(process.env.MIN_TWITTER_LIKES) || 100;
-        this.connectionId = Math.random().toString(36).substring(7);
-        
-        // 🔥 TESTING MODE: Disable Twitter checks
-        this.disableTwitterCheck = config.disableTwitterCheck !== undefined ? config.disableTwitterCheck : false;
-        
-        this.botMode = config.botMode || process.env.BOT_MODE || 'both';
-        
-        this.httpClient = axios.create({
-            timeout: 5000,
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Connection': 'keep-alive'
-            },
-            keepAlive: true
-        });
-
         this.metadataCache = new Map();
         
+        this.httpClient = axios.create({
+            timeout: 10000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+
         this.messageStats = {
             received: 0,
             processed: 0,
@@ -37,25 +33,21 @@ class TradingWebSocket extends EventEmitter {
             skipped: 0,
             errors: 0
         };
+
+        // Auto-cleanup cache every 5 minutes
+        setInterval(() => this.cleanupCache(), 300000);
         
-        setInterval(() => this.cleanupCache(), 60000);
+        logger.info(`[${this.connectionId}] TradingWebSocket initialized - Mode: ${this.botMode.toUpperCase()}, Min likes: ${this.minLikes}, Twitter check: ${this.disableTwitterCheck ? 'DISABLED' : 'ENABLED'}`);
     }
 
     connect() {
-        logger.info(`[${this.connectionId}] Connecting to PumpPortal for trading signals...`);
-        logger.info(`[${this.connectionId}] 🎯 Bot Mode: ${this.botMode.toUpperCase()}`);
-        
-        // 🔥 TESTING: Log Twitter check status
-        if (this.disableTwitterCheck) {
-            logger.info(`[${this.connectionId}] 🚫 TESTING MODE: Twitter checks DISABLED - Will trade ALL tokens!`);
-        } else {
-            logger.info(`[${this.connectionId}] 🐦 Twitter checks ENABLED - Min likes: ${this.minLikes}`);
-        }
-        
-        this.ws = new WebSocket('wss://pumpportal.fun/api/data');
-        
+        const wsUrl = 'wss://pumpportal.fun/api/data';
+        logger.info(`[${this.connectionId}] Connecting to ${wsUrl}...`);
+
+        this.ws = new WebSocket(wsUrl);
+
         this.ws.on('open', () => {
-            logger.info(`[${this.connectionId}] 🔗 Connected to PumpPortal`);
+            logger.info(`[${this.connectionId}] WebSocket connected`);
             this.isConnected = true;
             this.subscribeBasedOnMode();
         });
@@ -64,9 +56,9 @@ class TradingWebSocket extends EventEmitter {
             this.messageStats.received++;
             
             try {
-                const message = JSON.parse(data.toString());
+                const message = JSON.parse(data);
                 
-                if (message.message && message.message.includes('Successfully subscribed')) {
+                if (message.message && message.message.includes('subscribed')) {
                     logger.info(`[${this.connectionId}] ✅ ${message.message}`);
                     return;
                 }
@@ -87,15 +79,6 @@ class TradingWebSocket extends EventEmitter {
                         await this.processToken(message, 'migration');
                     } else {
                         logger.debug(`[${this.connectionId}] ⏭️ Ignoring migration (mode: ${this.botMode}): ${message.mint}`);
-                    }
-                }
-                else if (message.txType === 'migration' && message.mint) {
-                    if (this.shouldProcessEventType('migration')) {
-                        this.messageStats.migrations++;
-                        logger.info(`[${this.connectionId}] 🔄 Migration (legacy): ${message.mint}`);
-                        await this.processToken(message, 'migration');
-                    } else {
-                        logger.debug(`[${this.connectionId}] ⏭️ Ignoring legacy migration (mode: ${this.botMode}): ${message.mint}`);
                     }
                 }
                 else if (message.mint) {
@@ -163,22 +146,30 @@ class TradingWebSocket extends EventEmitter {
             
             logger.info(`[${this.connectionId}] 🔍 PROCESSING: ${tokenSymbol} (${eventType})`);
             
+            // 🔥 NEW: Extract metadata FIRST to get real symbol and name
+            let enhancedTokenData = await this.extractTokenMetadata(tokenData);
+            
+            // Log the extracted metadata for debugging
+            logger.info(`[${this.connectionId}] 📊 METADATA EXTRACTED:`);
+            logger.info(`   Original: symbol="${tokenData.symbol}", name="${tokenData.name}"`);
+            logger.info(`   Enhanced: symbol="${enhancedTokenData.symbol}", name="${enhancedTokenData.name}"`);
+            
             // 🔥 TESTING MODE: Skip Twitter check if disabled
             if (this.disableTwitterCheck) {
-                logger.info(`[${this.connectionId}] 🚫 TESTING: Skipping Twitter check for ${tokenSymbol} (${eventType})`);
+                logger.info(`[${this.connectionId}] 🚫 TESTING: Skipping Twitter check for ${enhancedTokenData.symbol} (${eventType})`);
                 
                 // Emit qualified token immediately without Twitter check
                 this.messageStats.qualified++;
                 const totalTime = Date.now() - processingStart;
                 
-                logger.info(`[${this.connectionId}] ✅ QUALIFIED (NO TWITTER CHECK): ${tokenSymbol} (${eventType}) - ${totalTime}ms total`);
+                logger.info(`[${this.connectionId}] ✅ QUALIFIED (NO TWITTER CHECK): ${enhancedTokenData.symbol} (${eventType}) - ${totalTime}ms total`);
                 
                 const qualifiedData = {
                     eventType: eventType,
                     token: {
-                        address: tokenData.mint,
-                        symbol: tokenData.symbol || 'UNKNOWN',
-                        name: tokenData.name || 'Unknown Token'
+                        address: enhancedTokenData.mint,
+                        symbol: enhancedTokenData.symbol, // 🔥 Use enhanced metadata
+                        name: enhancedTokenData.name     // 🔥 Use enhanced metadata
                     },
                     twitter: {
                         likes: 999999, // Fake high number to pass any downstream checks
@@ -199,14 +190,14 @@ class TradingWebSocket extends EventEmitter {
             }
             
             // 🔥 ORIGINAL TWITTER CHECK CODE (when testing mode is disabled)
-            const twitterUrl = await this.extractTwitterUrlWithIPFS(tokenData);
+            const twitterUrl = await this.extractTwitterUrlWithIPFS(enhancedTokenData);
             if (!twitterUrl) {
                 this.messageStats.skipped++;
-                logger.info(`[${this.connectionId}] ⏭️ SKIPPED: ${tokenSymbol} (${eventType}) - No Twitter URL found`);
+                logger.info(`[${this.connectionId}] ⏭️ SKIPPED: ${enhancedTokenData.symbol} (${eventType}) - No Twitter URL found`);
                 return;
             }
 
-            logger.info(`[${this.connectionId}] 🐦 CHECKING: ${tokenSymbol} (${eventType}) - Twitter: ${twitterUrl}`);
+            logger.info(`[${this.connectionId}] 🐦 CHECKING: ${enhancedTokenData.symbol} (${eventType}) - Twitter: ${twitterUrl}`);
 
             const likesStart = Date.now();
             const likes = await this.checkLikes(twitterUrl);
@@ -214,21 +205,21 @@ class TradingWebSocket extends EventEmitter {
             
             if (!likes || likes < this.minLikes) {
                 this.messageStats.skipped++;
-                logger.info(`[${this.connectionId}] ⏭️ SKIPPED: ${tokenSymbol} (${eventType}) - ${likes} likes < ${this.minLikes} required (${likesTime}ms)`);
+                logger.info(`[${this.connectionId}] ⏭️ SKIPPED: ${enhancedTokenData.symbol} (${eventType}) - ${likes} likes < ${this.minLikes} required (${likesTime}ms)`);
                 return;
             }
 
             this.messageStats.qualified++;
             const totalTime = Date.now() - processingStart;
             
-            logger.info(`[${this.connectionId}] ✅ QUALIFIED: ${tokenSymbol} (${eventType}) - ${likes} likes ≥ ${this.minLikes} required (${totalTime}ms total)`);
+            logger.info(`[${this.connectionId}] ✅ QUALIFIED: ${enhancedTokenData.symbol} (${eventType}) - ${likes} likes ≥ ${this.minLikes} required (${totalTime}ms total)`);
             
             const qualifiedData = {
                 eventType: eventType,
                 token: {
-                    address: tokenData.mint,
-                    symbol: tokenData.symbol || 'UNKNOWN',
-                    name: tokenData.name || 'Unknown Token'
+                    address: enhancedTokenData.mint,
+                    symbol: enhancedTokenData.symbol, // 🔥 Use enhanced metadata
+                    name: enhancedTokenData.name     // 🔥 Use enhanced metadata
                 },
                 twitter: {
                     likes: likes,
@@ -252,6 +243,125 @@ class TradingWebSocket extends EventEmitter {
         }
     }
 
+    // 🔥 NEW: Extract token metadata including symbol and name
+    async extractTokenMetadata(tokenData) {
+        const tokenAddress = tokenData.mint;
+        
+        // Start with original data - BUT handle undefined values properly
+        let enhancedData = {
+            ...tokenData,
+            symbol: tokenData.symbol || 'UNKNOWN',
+            name: tokenData.name || 'Unknown Token'
+        };
+        
+        try {
+            // Check if we have cached metadata
+            if (this.metadataCache.has(tokenAddress)) {
+                const cached = this.metadataCache.get(tokenAddress);
+                if (cached.metadata) {
+                    logger.debug(`[${this.connectionId}] 📁 Using cached metadata for symbol/name extraction`);
+                    return this.enhanceTokenDataWithMetadata(enhancedData, cached.metadata);
+                }
+            }
+    
+            // Fetch metadata if not cached
+            let metadataUri = tokenData.uri;
+            
+            if (!metadataUri) {
+                metadataUri = await this.getMetadataURI(tokenAddress);
+            }
+            
+            if (!metadataUri) {
+                logger.debug(`[${this.connectionId}] ❌ No metadata URI found for ${tokenAddress}`);
+                return enhancedData;
+            }
+    
+            // Convert IPFS/AR links
+            if (metadataUri.startsWith('ipfs://')) {
+                metadataUri = metadataUri.replace('ipfs://', 'https://ipfs.io/ipfs/');
+            } else if (metadataUri.startsWith('ar://')) {
+                metadataUri = metadataUri.replace('ar://', 'https://arweave.net/');
+            }
+    
+            logger.debug(`[${this.connectionId}] 📁 Fetching metadata for symbol/name: ${metadataUri}`);
+            
+            const response = await this.httpClient.get(metadataUri);
+            const metadata = response.data;
+            
+            // 🔥 LOG THE FULL METADATA STRUCTURE
+            logger.info(`[${this.connectionId}] 📊 FULL METADATA STRUCTURE:`);
+            logger.info(JSON.stringify(metadata, null, 2));
+            
+            // Cache the metadata
+            this.metadataCache.set(tokenAddress, {
+                metadata: metadata,
+                twitterUrl: this.extractTwitterFromMetadata(metadata),
+                timestamp: Date.now()
+            });
+            
+            return this.enhanceTokenDataWithMetadata(enhancedData, metadata);
+            
+        } catch (error) {
+            logger.debug(`[${this.connectionId}] ❌ Failed to extract metadata for ${tokenAddress}: ${error.message}`);
+            return enhancedData;
+        }
+    }
+
+    // 🔥 NEW: Extract symbol and name from metadata
+    enhanceTokenDataWithMetadata(tokenData, metadata) {
+        if (!metadata || typeof metadata !== 'object') {
+            return tokenData;
+        }
+        
+        // Extract symbol and name from metadata
+        let extractedSymbol = tokenData.symbol;
+        let extractedName = tokenData.name;
+        
+        // 🔥 BUG FIX: Check for undefined values properly
+        // Try different fields for symbol
+        if (metadata.symbol && metadata.symbol !== 'UNKNOWN' && metadata.symbol !== undefined) {
+            extractedSymbol = metadata.symbol;
+        } else if (metadata.properties?.symbol && metadata.properties.symbol !== undefined) {
+            extractedSymbol = metadata.properties.symbol;
+        } else if (metadata.attributes) {
+            const symbolAttr = metadata.attributes.find(attr => 
+                attr.trait_type?.toLowerCase() === 'symbol' || 
+                attr.key?.toLowerCase() === 'symbol'
+            );
+            if (symbolAttr?.value && symbolAttr.value !== undefined) {
+                extractedSymbol = symbolAttr.value;
+            }
+        }
+        
+        // 🔥 BUG FIX: Check for undefined values properly  
+        // Try different fields for name
+        if (metadata.name && metadata.name !== 'Unknown Token' && metadata.name !== undefined) {
+            extractedName = metadata.name;
+        } else if (metadata.properties?.name && metadata.properties.name !== undefined) {
+            extractedName = metadata.properties.name;
+        } else if (metadata.title && metadata.title !== undefined) {
+            extractedName = metadata.title;
+        }
+        
+        // 🔥 ADDITIONAL FIX: Ensure we don't set undefined values back
+        if (extractedSymbol === undefined || extractedSymbol === 'undefined') {
+            extractedSymbol = tokenData.symbol || 'UNKNOWN';
+        }
+        if (extractedName === undefined || extractedName === 'undefined') {
+            extractedName = tokenData.name || 'Unknown Token';
+        }
+        
+        logger.debug(`[${this.connectionId}] 📊 EXTRACTED FROM METADATA:`);
+        logger.debug(`   Symbol: "${extractedSymbol}" (was: "${tokenData.symbol}")`);
+        logger.debug(`   Name: "${extractedName}" (was: "${tokenData.name}")`);
+        
+        return {
+            ...tokenData,
+            symbol: extractedSymbol,
+            name: extractedName
+        };
+    }
+
     // 🔥 TESTING METHOD: Enable/disable Twitter checks at runtime
     setTwitterCheckEnabled(enabled) {
         this.disableTwitterCheck = !enabled;
@@ -262,7 +372,6 @@ class TradingWebSocket extends EventEmitter {
         }
     }
 
-    // Rest of the methods remain unchanged...
     async extractTwitterUrlWithIPFS(tokenData) {
         const tokenAddress = tokenData.mint;
         
@@ -476,7 +585,7 @@ class TradingWebSocket extends EventEmitter {
             connectionId: this.connectionId,
             isConnected: this.isConnected,
             botMode: this.botMode,
-            twitterCheckEnabled: !this.disableTwitterCheck, // 🔥 NEW STAT
+            twitterCheckEnabled: !this.disableTwitterCheck,
             messageStats: this.messageStats,
             cacheSize: this.metadataCache.size,
             minLikes: this.minLikes,

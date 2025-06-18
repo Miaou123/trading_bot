@@ -1,4 +1,4 @@
-// src/bot/tradingBot.js - PumpSwap integrated trading bot
+// src/bot/tradingBot.js - PumpSwap integrated trading bot (LIVE ONLY)
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
 const PumpSwapService = require('../services/pumpSwapService');
@@ -8,7 +8,7 @@ class TradingBot extends EventEmitter {
         super();
         
         this.config = {
-            tradingMode: config.tradingMode || process.env.TRADING_MODE || 'paper',
+            tradingMode: config.tradingMode || process.env.TRADING_MODE || 'live',
             initialInvestment: parseFloat(config.initialInvestment || process.env.INITIAL_INVESTMENT_SOL) || 0.01,
             stopLossPercentage: parseFloat(process.env.STOP_LOSS_PERCENTAGE) || 50,
             buySlippage: parseFloat(process.env.BUY_SLIPPAGE_TOLERANCE) || 30,
@@ -18,7 +18,7 @@ class TradingBot extends EventEmitter {
             takeProfitLevels: [
                 { percentage: 100, sellPercentage: 50 },  // 2x - sell 50%
                 { percentage: 300, sellPercentage: 25 },  // 4x - sell 25%
-                { percentage: 900, sellPercentage: 100 }  // 10x - sell rest
+                { percentage: 900, sellPercentage: 12.5 }  // 10x - sell 12.5% (keep rest)
             ]
         };
 
@@ -45,7 +45,6 @@ class TradingBot extends EventEmitter {
             sellOrders: 0,
             totalPnL: 0,
             liveTrades: 0,
-            paperTrades: 0,
             stopLossExecutions: 0,
             takeProfitExecutions: 0,
             errors: 0
@@ -62,7 +61,6 @@ class TradingBot extends EventEmitter {
             logger.info(`🎯 Initial investment: ${this.config.initialInvestment} SOL`);
             logger.info(`🛡️ Stop loss: ${this.config.stopLossPercentage}%`);
             
-            // 🔥 NEW: Log separate slippage settings
             logger.info(`📈 Buy slippage: ${this.config.buySlippage}% (conservative entry)`);
             logger.info(`📉 Sell slippage: ${this.config.sellSlippage}% (guaranteed exit)`);
             
@@ -89,7 +87,7 @@ class TradingBot extends EventEmitter {
         try {
             const marketData = await this.pumpSwapService.getMarketData(tokenAddress);
             if (marketData && marketData.price) {
-                return marketData.price; // Return just the price number
+                return marketData.price;
             }
             
             throw new Error('Price not available from PumpSwap');
@@ -110,7 +108,7 @@ class TradingBot extends EventEmitter {
         }
     }
 
-    // Execute buy order
+    // Execute buy order (LIVE ONLY)
     async executeBuy(alert) {
         try {
             const tokenAddress = alert.token.address;
@@ -118,56 +116,43 @@ class TradingBot extends EventEmitter {
             const investmentAmount = this.config.initialInvestment;
             
             logger.info(`💰 Executing BUY: ${investmentAmount} SOL → ${symbol}`);
-
-            if (this.config.tradingMode === 'live') {
-                // Live trading via PumpSwap
-                const result = await this.pumpSwapService.executeBuy(
-                    tokenAddress, 
-                    investmentAmount, 
-                    this.config.buySlippage
-                );
+            
+            // Execute live trade
+            const result = await this.pumpSwapService.executeBuy(
+                tokenAddress, 
+                investmentAmount, 
+                this.config.buySlippage
+            );
+            
+            if (result.success) {
+                // Use the price that was calculated during the buy operation
+                const currentPrice = result.calculatedPrice;
                 
-                if (result.success) {
-                    const currentPrice = investmentAmount / result.tokensReceived;
-                    const position = await this.createLivePosition(alert, investmentAmount, currentPrice, result);
-                    
-                    this.stats.liveTrades++;
-                    this.stats.buyOrders++;
-                    this.stats.tradesExecuted++;
-                    
-                    this.emit('tradeExecuted', {
-                        type: 'LIVE_BUY',
-                        symbol: symbol,
-                        amount: result.tokensReceived,
-                        price: currentPrice,
-                        signature: result.signature,
-                        method: 'pumpswap'
-                    });
-                    
-                    return position;
+                if (!currentPrice || currentPrice <= 0) {
+                    throw new Error('No calculated price returned from buy operation');
                 }
                 
-                throw new Error('PumpSwap buy failed');
-            } else {
-                // Paper trading
-                const priceInfo = await this.getTokenPrice(tokenAddress, true);
-                const expectedTokens = investmentAmount / priceInfo;
-                const position = await this.createPaperPosition(alert, investmentAmount, priceInfo, expectedTokens);
+                logger.info(`💰 Using calculated price: ${currentPrice.toFixed(12)} SOL per token`);
+            
+                const position = await this.createLivePosition(alert, investmentAmount, currentPrice, result);
                 
-                this.stats.paperTrades++;
+                this.stats.liveTrades++;
                 this.stats.buyOrders++;
                 this.stats.tradesExecuted++;
                 
                 this.emit('tradeExecuted', {
-                    type: 'PAPER_BUY',
+                    type: 'LIVE_BUY',
                     symbol: symbol,
-                    amount: expectedTokens,
-                    price: priceInfo,
-                    method: 'simulated'
+                    amount: result.tokensReceived,
+                    price: currentPrice,
+                    signature: result.signature,
+                    method: 'pumpswap'
                 });
                 
                 return position;
             }
+            
+            throw new Error('PumpSwap buy failed');
 
         } catch (error) {
             this.stats.errors++;
@@ -179,72 +164,67 @@ class TradingBot extends EventEmitter {
     // Execute sell order (called by position manager)
     async executePumpSwapSell(position, sellPercentage, reason = 'Manual Sell') {
         try {
-            if (this.config.tradingMode === 'live') {
-                // Live selling via PumpSwap
-                const tokenAmount = parseFloat(position.remainingQuantity) * (sellPercentage / 100);
+            // Live selling via PumpSwap
+            const tokenAmount = parseFloat(position.remainingQuantity) * (sellPercentage / 100);
+            
+            const result = await this.pumpSwapService.executeSell(
+                position.tokenAddress,
+                tokenAmount,
+                this.config.sellSlippage
+            );
+            
+            if (result.success) {
+                // Calculate PnL
+                const originalInvestment = (tokenAmount / parseFloat(position.quantity)) * position.investedAmount;
+                const pnl = result.solReceived - originalInvestment;
+                const pnlPercentage = (pnl / originalInvestment) * 100;
                 
-                const result = await this.pumpSwapService.executeSell(
-                    position.tokenAddress,
-                    tokenAmount,
-                    this.config.sellSlippage
-                );
+                this.stats.liveTrades++;
+                this.stats.sellOrders++;
+                this.stats.totalPnL += pnl;
                 
-                if (result.success) {
-                    // Calculate PnL
-                    const originalInvestment = (tokenAmount / parseFloat(position.quantity)) * position.investedAmount;
-                    const pnl = result.solReceived - originalInvestment;
-                    const pnlPercentage = (pnl / originalInvestment) * 100;
-                    
-                    this.stats.liveTrades++;
-                    this.stats.sellOrders++;
-                    this.stats.totalPnL += pnl;
-                    
-                    if (reason.includes('Stop Loss')) {
-                        this.stats.stopLossExecutions++;
-                    } else if (reason.includes('Take Profit')) {
-                        this.stats.takeProfitExecutions++;
-                    }
-                    
-                    // Update position through position manager
-                    if (this.positionManager) {
-                        await this.positionManager.updatePositionAfterSell(
-                            position.id,
-                            tokenAmount,
-                            result.solReceived,
-                            pnl,
-                            result.signature,
-                            reason
-                        );
-                    }
-                    
-                    this.emit('tradeExecuted', {
-                        type: 'LIVE_SELL',
-                        symbol: position.symbol,
-                        amount: tokenAmount,
-                        price: result.solReceived / tokenAmount,
-                        signature: result.signature,
-                        pnl: pnl,
-                        pnlPercentage: pnlPercentage,
-                        reason: reason,
-                        method: 'pumpswap'
-                    });
-                    
-                    return {
-                        success: true,
-                        signature: result.signature,
-                        tokensSold: tokenAmount,
-                        solReceived: result.solReceived,
-                        pnl: pnl,
-                        pnlPercentage: pnlPercentage,
-                        method: 'pumpswap'
-                    };
+                if (reason.includes('Stop Loss')) {
+                    this.stats.stopLossExecutions++;
+                } else if (reason.includes('Take Profit')) {
+                    this.stats.takeProfitExecutions++;
                 }
                 
-                throw new Error('PumpSwap sell failed');
-            } else {
-                // Paper trading simulation
-                return await this.simulatePaperSell(position, sellPercentage, reason);
+                // Update position through position manager
+                if (this.positionManager) {
+                    await this.positionManager.updatePositionAfterSell(
+                        position.id,
+                        tokenAmount,
+                        result.solReceived,
+                        pnl,
+                        result.signature,
+                        reason
+                    );
+                }
+                
+                this.emit('tradeExecuted', {
+                    type: 'LIVE_SELL',
+                    symbol: position.symbol,
+                    amount: tokenAmount,
+                    price: result.solReceived / tokenAmount,
+                    signature: result.signature,
+                    pnl: pnl,
+                    pnlPercentage: pnlPercentage,
+                    reason: reason,
+                    method: 'pumpswap'
+                });
+                
+                return {
+                    success: true,
+                    signature: result.signature,
+                    tokensSold: tokenAmount,
+                    solReceived: result.solReceived,
+                    pnl: pnl,
+                    pnlPercentage: pnlPercentage,
+                    method: 'pumpswap'
+                };
             }
+            
+            throw new Error('PumpSwap sell failed');
 
         } catch (error) {
             this.stats.errors++;
@@ -257,7 +237,7 @@ class TradingBot extends EventEmitter {
     async createLivePosition(alert, investmentAmount, currentPrice, tradeResult) {
         const stopLossPrice = this.calculateStopLossPrice(currentPrice);
         const takeProfitPrices = this.calculateTakeProfitPrices(currentPrice);
-    
+
         const position = {
             id: this.generatePositionId(),
             tokenAddress: alert.token.address,
@@ -274,17 +254,17 @@ class TradingBot extends EventEmitter {
             alert: alert,
             paperTrade: false,
             priceSource: 'pumpswap_service',
-            migrationPool: tradeResult.poolAddress, // 🔥 FIXED: Store actual pool address from buy result
-            poolAddress: tradeResult.poolAddress, // 🔥 FIXED: Store pool address for price updates
+            migrationPool: tradeResult.poolAddress,
+            poolAddress: tradeResult.poolAddress,
             eventType: alert.eventType || 'creation',
             isMigration: alert.migration ? true : false,
             tradingMethod: 'pumpswap'
         };
-    
+
         if (this.positionManager) {
             await this.positionManager.addPosition(position);
         }
-    
+
         return position;
     }
 
@@ -341,7 +321,6 @@ class TradingBot extends EventEmitter {
             buyOrders: this.stats.buyOrders,
             sellOrders: this.stats.sellOrders,
             liveTrades: this.stats.liveTrades,
-            paperTrades: this.stats.paperTrades,
             totalPnL: this.stats.totalPnL.toFixed(6) + ' SOL',
             stopLossExecutions: this.stats.stopLossExecutions,
             takeProfitExecutions: this.stats.takeProfitExecutions,

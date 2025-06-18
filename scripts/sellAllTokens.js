@@ -246,7 +246,12 @@ class TokenCleaner {
                     maxRetries: 3
                 });
                 
-                await this.connection.confirmTransaction(signature, 'confirmed');
+                const latestBlockhash = await this.connection.getLatestBlockhash();
+                await this.connection.confirmTransaction({
+                    signature: signature,
+                    blockhash: latestBlockhash.blockhash,
+                    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+                }, 'confirmed');
                 
                 console.log(`   ✅ Burned tokens successfully`);
                 console.log(`   🔗 https://solscan.io/tx/${signature}`);
@@ -303,7 +308,12 @@ class TokenCleaner {
                 maxRetries: 3
             });
             
-            await this.connection.confirmTransaction(signature, 'confirmed');
+            const latestBlockhash = await this.connection.getLatestBlockhash();
+            await this.connection.confirmTransaction({
+                signature: signature,
+                blockhash: latestBlockhash.blockhash,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+            }, 'confirmed');
             
             console.log(`   ✅ Unwrapped ${token.balance.toFixed(4)} WSOL to native SOL`);
             console.log(`   🔗 https://solscan.io/tx/${signature}`);
@@ -349,8 +359,13 @@ class TokenCleaner {
             const signature = await this.connection.sendTransaction(transaction, {
                 maxRetries: 3
             });
-            
-            await this.connection.confirmTransaction(signature, 'confirmed');
+
+            const latestBlockhash = await this.connection.getLatestBlockhash();
+            await this.connection.confirmTransaction({
+                signature: signature,
+                blockhash: latestBlockhash.blockhash,
+                lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+            }, 'confirmed');
             
             console.log(`   ✅ Closed token account (reclaimed ~0.002 SOL rent)`);
             console.log(`   🔗 https://solscan.io/tx/${signature}`);

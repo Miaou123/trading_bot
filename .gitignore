@@ -51,3 +51,7 @@ positions.json
 trades_history.json
 *.backup
 backups/
+
+# Bot runtime data files
+positions.json
+trades_history.json
