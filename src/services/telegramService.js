@@ -19,6 +19,12 @@ class TelegramService {
         } else if (this.config.enabled) {
             logger.warn('📱 Telegram notifications enabled but missing TOKEN or USER_ID');
         }
+
+        this.solPriceCache = {
+            price: null,
+            lastUpdated: null,
+            cacheDuration: 60000 // 1 minute cache
+        };
     }
 
     async initialize() {
@@ -40,6 +46,65 @@ class TelegramService {
         }
     }
 
+        // 🔥 NEW: Get SOL price in USD from CoinGecko (free, no API key needed)
+        async getSolPriceUSD() {
+            try {
+                // Check cache first
+                const now = Date.now();
+                if (this.solPriceCache.price && 
+                    this.solPriceCache.lastUpdated && 
+                    (now - this.solPriceCache.lastUpdated) < this.solPriceCache.cacheDuration) {
+                    return this.solPriceCache.price;
+                }
+    
+                // Fetch fresh price from CoinGecko
+                const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
+                const data = await response.json();
+                
+                if (data?.solana?.usd) {
+                    const price = data.solana.usd;
+                    
+                    // Update cache
+                    this.solPriceCache = {
+                        price: price,
+                        lastUpdated: now,
+                        cacheDuration: 60000
+                    };
+                    
+                    logger.debug(`💰 SOL Price: $${price}`);
+                    return price;
+                }
+                
+                throw new Error('Invalid response format');
+                
+            } catch (error) {
+                logger.error(`❌ Failed to fetch SOL price: ${error.message}`);
+                // Return fallback price or null
+                return this.solPriceCache.price || 200; // Fallback to ~$200 if no cached price
+            }
+        }
+    
+        // 🔥 NEW: Helper to format SOL amounts with USD equivalent
+        async formatSolWithUSD(solAmount, decimals = 4) {
+            const solPrice = await this.getSolPriceUSD();
+            const usdAmount = solAmount * solPrice;
+            
+            return `\`${solAmount.toFixed(decimals)} SOL\` (~$${usdAmount.toFixed(2)})`;
+        }
+    
+        // 🔥 NEW: Helper to format token price in both SOL and USD
+        async formatTokenPrice(priceInSol, decimals = 8) {
+            const solPrice = await this.getSolPriceUSD();
+            const priceInUSD = priceInSol * solPrice;
+            
+            if (priceInUSD < 0.01) {
+                // For very small USD amounts, show more decimals
+                return `\`${priceInSol.toFixed(decimals)} SOL\` (~$${priceInUSD.toFixed(6)})`;
+            } else {
+                return `\`${priceInSol.toFixed(decimals)} SOL\` (~$${priceInUSD.toFixed(4)})`;
+            }
+        }
+
     async sendStartupMessage() {
         if (!this.isInitialized) return;
 
@@ -60,22 +125,28 @@ class TelegramService {
             ? `[Twitter](${alert.twitter.url}) (${alert.twitter.likes || 0} likes)` 
             : 'No Twitter found';
 
+        // Format amounts with USD
+        const investmentFormatted = await this.formatSolWithUSD(position.investedAmount);
+        const entryPriceFormatted = await this.formatTokenPrice(position.entryPrice);
+        const stopLossFormatted = await this.formatTokenPrice(position.stopLossPrice);
+
         const message = `${modeEmoji} *NEW POSITION OPENED*\n\n` +
                        `🪙 **${position.symbol}**\n` +
                        `📋 Address: \`${position.tokenAddress}\`\n` +
                        `📈 [DexScreener Chart](https://dexscreener.com/solana/${position.tokenAddress})\n\n` +
                        
-                       `💰 Investment: \`${position.investedAmount.toFixed(4)} SOL\`\n` +
-                       `📊 Entry Price: \`${position.entryPrice.toFixed(8)} SOL\`\n` +
+                       `💰 Investment: ${investmentFormatted}\n` +
+                       `📊 Entry Price: ${entryPriceFormatted}\n` +
                        `🎯 Quantity: \`${parseFloat(position.quantity).toLocaleString()}\` tokens\n\n` +
                        
                        `**📈 Take Profit Levels:**\n` +
-                       position.takeProfitLevels.map(tp => 
-                           `• TP${tp.level}: \`${tp.targetPrice.toFixed(8)} SOL\` (+${tp.percentage}%) - Sell ${tp.sellPercentage}%`
-                       ).join('\n') + '\n\n' +
+                       await Promise.all(position.takeProfitLevels.map(async tp => {
+                           const tpFormatted = await this.formatTokenPrice(tp.targetPrice);
+                           return `• TP${tp.level}: ${tpFormatted} (+${tp.percentage}%) - Sell ${tp.sellPercentage}%`;
+                       })).then(lines => lines.join('\n')) + '\n\n' +
                        
                        `**🛡️ Risk Management:**\n` +
-                       `• Stop Loss: \`${position.stopLossPrice.toFixed(8)} SOL\` (-${((1 - position.stopLossPrice/position.entryPrice) * 100).toFixed(1)}%)\n\n` +
+                       `• Stop Loss: ${stopLossFormatted} (-${((1 - position.stopLossPrice/position.entryPrice) * 100).toFixed(1)}%)\n\n` +
                        
                        `**🐦 Social:**\n${twitterInfo}\n\n` +
                        `⏰ ${new Date().toLocaleString()}`;
@@ -83,6 +154,7 @@ class TelegramService {
         await this.sendMessage(message);
     }
 
+    // 🔥 UPDATED: Enhanced take profit alert with USD amounts
     async sendTakeProfitAlert(position, tpData) {
         if (!this.isInitialized) return;
 
@@ -93,78 +165,87 @@ class TelegramService {
         const totalPnL = (position.totalRealizedPnL || 0) + (currentValue - (totalInvested * remainingPercentage / 100));
         const pnlPercentage = (totalPnL / totalInvested) * 100;
 
+        // Format amounts with USD
+        const triggerPriceFormatted = await this.formatTokenPrice(tpData.triggerPrice);
+        const currentValueFormatted = await this.formatSolWithUSD(currentValue);
+        const totalPnLFormatted = await this.formatSolWithUSD(Math.abs(totalPnL));
+
         const message = `${modeEmoji} *TAKE PROFIT HIT!* 🎯\n\n` +
                        `🪙 **${position.symbol}** (${position.tokenAddress.slice(0, 8)}...)\n` +
-                       `📊 TP${tpData.level} triggered at \`${tpData.triggerPrice.toFixed(8)} SOL\`\n` +
+                       `📊 TP${tpData.level} triggered at ${triggerPriceFormatted}\n` +
                        `💹 Gain: **+${tpData.gainPercentage.toFixed(1)}%**\n` +
                        `📤 Sold: ${tpData.sellPercentage}% of remaining position\n\n` +
                        
                        `**💰 Current Bag:**\n` +
                        `• Remaining: \`${parseFloat(position.remainingQuantity).toLocaleString()}\` tokens (${remainingPercentage.toFixed(1)}% of original)\n` +
-                       `• Current Value: \`${currentValue.toFixed(4)} SOL\`\n` +
-                       `• Total PnL: \`${totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(4)} SOL\` (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)\n\n` +
+                       `• Current Value: ${currentValueFormatted}\n` +
+                       `• Total PnL: ${totalPnL >= 0 ? '+' : '-'}${totalPnLFormatted} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)\n\n` +
                        
                        `**🛡️ New Stop Loss:**\n` +
                        (tpData.trailingStopLoss ? 
-                           `• Updated to: \`${tpData.trailingStopLoss.newStopLoss.toFixed(8)} SOL\`\n` +
+                           `• Updated to: ${await this.formatTokenPrice(tpData.trailingStopLoss.newStopLoss)}\n` +
                            `• Protection: ${tpData.trailingStopLoss.stopLossInfo}\n` +
-                           `• Previous SL: \`${tpData.trailingStopLoss.oldStopLoss.toFixed(8)} SOL\`\n\n`
-                           : `• Current: \`${position.stopLossPrice.toFixed(8)} SOL\`\n\n`) +
+                           `• Previous SL: ${await this.formatTokenPrice(tpData.trailingStopLoss.oldStopLoss)}\n\n`
+                           : `• Current: ${await this.formatTokenPrice(position.stopLossPrice)}\n\n`) +
                        
                        `⏰ ${new Date().toLocaleString()}`;
 
         await this.sendMessage(message);
     }
 
+    // 🔥 UPDATED: Enhanced stop loss alert with USD amounts
     async sendStopLossAlert(position, slData) {
         if (!this.isInitialized) return;
-    
+
         const modeEmoji = this.config.tradingMode === 'live' ? '🔴' : '📝';
         
-        // 🔥 FIXED: Calculate accurate totals using all realized PnL + any remaining value
         const totalRealizedPnL = position.totalRealizedPnL || 0;
-        const remainingValue = parseFloat(position.remainingQuantity || 0) * (position.currentPrice || slData.triggerPrice);
+        const remainingValue = parseFloat(position.remainingQuantity || 0) * slData.triggerPrice;
         const remainingInvestmentRatio = parseFloat(position.remainingQuantity || 0) / parseFloat(position.quantity);
         const remainingOriginalInvestment = position.investedAmount * remainingInvestmentRatio;
-        const finalSellPnL = remainingValue - remainingOriginalInvestment; // This should be the loss from the stop loss
+        const finalSellPnL = remainingValue - remainingOriginalInvestment;
         
         const totalPnL = totalRealizedPnL + finalSellPnL;
         const pnlPercentage = (totalPnL / position.investedAmount) * 100;
         const isProfit = totalPnL >= 0;
         const resultEmoji = isProfit ? '💚' : '❌';
         
-        // 🔥 FIXED: Calculate actual duration
         const startTime = position.entryTime || position.createdAt;
         const endTime = position.closedAt || Date.now();
         const duration = startTime ? this.formatDuration(endTime - startTime) : 'Unknown';
-    
-        // 🔥 FIXED: Get actual exit price (should come from the sell transaction)
-        const actualExitPrice = slData.triggerPrice; // This is where the stop loss triggered
+        const actualExitPrice = slData.triggerPrice;
+
+        // Format amounts with USD
+        const investmentFormatted = await this.formatSolWithUSD(position.investedAmount);
+        const entryPriceFormatted = await this.formatTokenPrice(position.entryPrice);
+        const exitPriceFormatted = await this.formatTokenPrice(actualExitPrice);
+        const totalPnLFormatted = await this.formatSolWithUSD(Math.abs(totalPnL));
         
         const message = `${modeEmoji} *POSITION CLOSED* ${resultEmoji}\n\n` +
                        `🪙 **${position.symbol}** (${position.tokenAddress.slice(0, 8)}...)\n` +
-                       `🛑 Stop Loss triggered at \`${actualExitPrice.toFixed(8)} SOL\`\n` +
+                       `🛑 Stop Loss triggered at ${exitPriceFormatted}\n` +
                        `📉 Loss from entry: **-${Math.abs(slData.lossPercentage).toFixed(1)}%**\n\n` +
                        
                        `**📊 Final Results:**\n` +
-                       `• Initial Investment: \`${position.investedAmount.toFixed(4)} SOL\`\n` +
-                       `• Entry Price: \`${position.entryPrice.toFixed(8)} SOL\`\n` +
-                       `• Exit Price: \`${actualExitPrice.toFixed(8)} SOL\`\n` +
+                       `• Initial Investment: ${investmentFormatted}\n` +
+                       `• Entry Price: ${entryPriceFormatted}\n` +
+                       `• Exit Price: ${exitPriceFormatted}\n` +
                        `• Duration: ${duration}\n\n` +
                        
                        `**💰 P&L Summary:**\n` +
-                       `• Total P&L: \`${totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(4)} SOL\`\n` +
+                       `• Total P&L: ${totalPnL >= 0 ? '+' : '-'}${totalPnLFormatted}\n` +
                        `• Total Return: **${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%**\n` +
                        `• Result: ${isProfit ? '✅ PROFIT' : '❌ LOSS'}\n\n` +
                        
                        (position.partialSells && position.partialSells.length > 0 ? 
                            `**📤 Previous Take Profits:**\n` +
-                           position.partialSells.map(sell => 
-                               `• ${sell.reason}: ${sell.pnl >= 0 ? '+' : ''}${sell.pnl.toFixed(4)} SOL`
-                           ).join('\n') + '\n\n' : '') +
+                           await Promise.all(position.partialSells.map(async sell => {
+                               const sellPnLFormatted = await this.formatSolWithUSD(Math.abs(sell.pnl));
+                               return `• ${sell.reason}: ${sell.pnl >= 0 ? '+' : '-'}${sellPnLFormatted}`;
+                           })).then(lines => lines.join('\n')) + '\n\n' : '') +
                        
                        `⏰ ${new Date().toLocaleString()}`;
-    
+
         await this.sendMessage(message);
     }
 

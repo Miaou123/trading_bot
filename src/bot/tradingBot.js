@@ -247,6 +247,7 @@ class TradingBot extends EventEmitter {
     async createLivePosition(alert, investmentAmount, currentPrice, tradeResult) {
         const stopLossPrice = this.calculateStopLossPrice(currentPrice);
         const takeProfitPrices = this.calculateTakeProfitPrices(currentPrice);
+        const actualInvestment = tradeResult.exactData?.exactSolSpent || tradeResult.solSpent || investmentAmount;
 
         const position = {
             id: this.generatePositionId(),
@@ -255,7 +256,7 @@ class TradingBot extends EventEmitter {
             side: 'LONG',
             entryPrice: currentPrice,
             quantity: tradeResult.tokensReceived.toString(),
-            investedAmount: investmentAmount,
+            investedAmount: actualInvestment,
             entryTime: Date.now(),
             txHash: tradeResult.signature,
             stopLossPrice: stopLossPrice,
