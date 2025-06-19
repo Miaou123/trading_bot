@@ -3,6 +3,7 @@ const EventEmitter = require('events');
 const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../utils/logger');
+const TelegramService = require('../services/telegramService');
 
 class PositionManager extends EventEmitter {
     constructor(config = {}) {
@@ -51,6 +52,11 @@ class PositionManager extends EventEmitter {
             retryAttempts: 0,
             manualReviewCount: 0
         };
+
+        // Initialize Telegram service
+        this.telegramService = new TelegramService({
+            tradingMode: this.config.tradingMode
+        });
         
         this.loadPositions();
         this.startEnhancedPriceUpdates();
@@ -735,13 +741,24 @@ class PositionManager extends EventEmitter {
                 this.sessionStats.stopLossTriggered++;
                 this.sessionStats.stopLossExecutions++;
                 
-                this.emit('stopLossTriggered', {
+                const slEventData = {
                     position: position,
                     triggerPrice: position.currentPrice,
                     lossPercentage: Math.abs(lossPercent),
                     priceSource: position.lastPriceSource,
                     executionMode: this.config.tradingMode
-                });
+                };
+                
+                // 🔥 NEW: Send Telegram notification for stop loss
+                if (this.telegramService && this.telegramService.isEnabled()) {
+                    try {
+                        await this.telegramService.sendStopLossAlert(position, slEventData);
+                    } catch (error) {
+                        logger.error('❌ Failed to send Telegram stop loss alert:', error.message);
+                    }
+                }
+                
+                this.emit('stopLossTriggered', slEventData);
                 
             } catch (error) {
                 logger.error(`❌ Stop loss execution failed for ${position.symbol}: ${error.message}`);
@@ -749,7 +766,6 @@ class PositionManager extends EventEmitter {
         }
     }
 
-    // Enhanced take profit check that respects pending status
     async checkTakeProfitsWithLiveExecution(position) {
         if (!position.takeProfitLevels || !position.currentPrice) return;
         if (position.status !== 'ACTIVE') return; // Don't trigger if pending
@@ -769,15 +785,68 @@ class PositionManager extends EventEmitter {
                     this.sessionStats.takeProfitTriggered++;
                     this.sessionStats.takeProfitExecutions++;
                     
-                    this.emit('takeProfitTriggered', {
+                    // 🔥 TRAILING STOP LOSS IMPLEMENTATION
+                    let newStopLossPrice = position.stopLossPrice;
+                    let stopLossInfo = '';
+                    const oldStopLoss = position.stopLossPrice;
+                    
+                    switch(tp.level) {
+                        case 1: // TP1 at +100% - Move SL to entry price (breakeven)
+                            newStopLossPrice = position.entryPrice;
+                            stopLossInfo = 'moved to breakeven (entry price)';
+                            logger.info(`📈 TRAILING STOP: ${position.symbol} SL moved to breakeven @ ${newStopLossPrice.toFixed(8)} SOL`);
+                            break;
+                            
+                        case 2: // TP2 at +300% - Move SL to +100% gain
+                            newStopLossPrice = position.entryPrice * 2.0; // +100% gain
+                            stopLossInfo = 'moved to +100% gain';
+                            logger.info(`📈 TRAILING STOP: ${position.symbol} SL moved to +100% @ ${newStopLossPrice.toFixed(8)} SOL`);
+                            break;
+                            
+                        case 3: // TP3 at +900% - Move SL to +500% gain
+                            newStopLossPrice = position.entryPrice * 6.0; // +500% gain
+                            stopLossInfo = 'moved to +500% gain';
+                            logger.info(`📈 TRAILING STOP: ${position.symbol} SL moved to +500% @ ${newStopLossPrice.toFixed(8)} SOL`);
+                            break;
+                    }
+                    
+                    // Update the stop loss price if it changed
+                    if (newStopLossPrice !== position.stopLossPrice) {
+                        position.stopLossPrice = newStopLossPrice;
+                        
+                        // Save the updated position
+                        this.positions.set(position.id, position);
+                        await this.savePositions();
+                        
+                        logger.info(`🛡️ STOP LOSS UPDATED: ${position.symbol} from ${oldStopLoss.toFixed(8)} SOL to ${newStopLossPrice.toFixed(8)} SOL (${stopLossInfo})`);
+                    }
+                    
+                    const tpEventData = {
                         position: position,
                         level: tp.level,
                         triggerPrice: position.currentPrice,
                         gainPercentage: gainPercent,
                         sellPercentage: tp.sellPercentage,
                         priceSource: position.lastPriceSource,
-                        executionMode: this.config.tradingMode
-                    });
+                        executionMode: this.config.tradingMode,
+                        // Add trailing stop loss info to the event
+                        trailingStopLoss: {
+                            oldStopLoss: oldStopLoss,
+                            newStopLoss: newStopLossPrice,
+                            stopLossInfo: stopLossInfo
+                        }
+                    };
+                    
+                    // 🔥 NEW: Send Telegram notification for take profit
+                    if (this.telegramService && this.telegramService.isEnabled()) {
+                        try {
+                            await this.telegramService.sendTakeProfitAlert(position, tpEventData);
+                        } catch (error) {
+                            logger.error('❌ Failed to send Telegram take profit alert:', error.message);
+                        }
+                    }
+                    
+                    this.emit('takeProfitTriggered', tpEventData);
                     
                 } catch (error) {
                     logger.error(`❌ Take profit ${tp.level} execution failed for ${position.symbol}: ${error.message}`);
@@ -817,6 +886,13 @@ class PositionManager extends EventEmitter {
         await this.savePositions();
         
         logger.info(`📈 Position created: ${position.symbol} [ACTIVE]`);
+
+        // 🔥 NEW: Send Telegram notification for new position
+        try {
+            await this.telegramService.sendNewPositionAlert(enhancedPosition, position.alertData || {});
+        } catch (error) {
+            logger.error('❌ Failed to send Telegram new position alert:', error.message);
+        }
         
         const priceSourceInfo = position.priceSource ? ` (${position.priceSource})` : '';
         const tradingModeInfo = position.paperTrade ? ' [PAPER]' : ' [LIVE]';

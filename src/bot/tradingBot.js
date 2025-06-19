@@ -174,9 +174,13 @@ class TradingBot extends EventEmitter {
             );
             
             if (result.success) {
-                // Calculate PnL
-                const originalInvestment = (tokenAmount / parseFloat(position.quantity)) * position.investedAmount;
-                const pnl = result.solReceived - originalInvestment;
+                // 🔥 FIXED: Use exact amounts from result, not estimates
+                const actualTokensSold = result.exactData?.exactTokensSold || result.tokensSpent || tokenAmount;
+                const actualSolReceived = result.exactData?.exactSolReceived || result.solReceived;
+                
+                // Calculate PnL based on actual amounts
+                const originalInvestment = (actualTokensSold / parseFloat(position.quantity)) * position.investedAmount;
+                const pnl = actualSolReceived - originalInvestment;
                 const pnlPercentage = (pnl / originalInvestment) * 100;
                 
                 this.stats.liveTrades++;
@@ -189,12 +193,18 @@ class TradingBot extends EventEmitter {
                     this.stats.takeProfitExecutions++;
                 }
                 
-                // Update position through position manager
+                logger.info(`💰 EXACT SELL RESULTS:`);
+                logger.info(`   Tokens Sold: ${actualTokensSold.toLocaleString()} (${sellPercentage}%)`);
+                logger.info(`   SOL Received: ${actualSolReceived.toFixed(6)} SOL`);
+                logger.info(`   Original Investment: ${originalInvestment.toFixed(6)} SOL`);
+                logger.info(`   PnL: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(6)} SOL (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
+                
+                // Update position through position manager with EXACT data
                 if (this.positionManager) {
                     await this.positionManager.updatePositionAfterSell(
                         position.id,
-                        tokenAmount,
-                        result.solReceived,
+                        actualTokensSold,
+                        actualSolReceived,
                         pnl,
                         result.signature,
                         reason
@@ -204,8 +214,8 @@ class TradingBot extends EventEmitter {
                 this.emit('tradeExecuted', {
                     type: 'LIVE_SELL',
                     symbol: position.symbol,
-                    amount: tokenAmount,
-                    price: result.solReceived / tokenAmount,
+                    amount: actualTokensSold,
+                    price: actualSolReceived / actualTokensSold,
                     signature: result.signature,
                     pnl: pnl,
                     pnlPercentage: pnlPercentage,
@@ -216,8 +226,8 @@ class TradingBot extends EventEmitter {
                 return {
                     success: true,
                     signature: result.signature,
-                    tokensSold: tokenAmount,
-                    solReceived: result.solReceived,
+                    tokensSold: actualTokensSold,
+                    solReceived: actualSolReceived,
                     pnl: pnl,
                     pnlPercentage: pnlPercentage,
                     method: 'pumpswap'
@@ -225,7 +235,7 @@ class TradingBot extends EventEmitter {
             }
             
             throw new Error('PumpSwap sell failed');
-
+    
         } catch (error) {
             this.stats.errors++;
             logger.error(`❌ Sell execution failed: ${error.message}`);
@@ -251,7 +261,7 @@ class TradingBot extends EventEmitter {
             stopLossPrice: stopLossPrice,
             takeProfitLevels: takeProfitPrices,
             remainingQuantity: tradeResult.tokensReceived.toString(),
-            alert: alert,
+            alertData: alert,
             paperTrade: false,
             priceSource: 'pumpswap_service',
             migrationPool: tradeResult.poolAddress,

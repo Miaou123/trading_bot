@@ -1,4 +1,4 @@
-// src/services/pumpSwapService.js - FIXED: Better pool derivation and debugging
+// src/services/pumpSwapService.js - ENHANCED: With exact transaction amount parsing
 const { Connection, PublicKey, Keypair, VersionedTransaction, TransactionMessage, SystemProgram, ComputeBudgetProgram } = require('@solana/web3.js');
 const { AccountLayout, NATIVE_MINT, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 const { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createCloseAccountInstruction } = require('@solana/spl-token');
@@ -51,7 +51,9 @@ class PumpSwapService {
             buysExecuted: 0,
             sellsExecuted: 0,
             errors: 0,
-            retryAttempts: 0 // 🔥 NEW: Track retry attempts
+            retryAttempts: 0,
+            exactAmountsParsed: 0,
+            estimatesUsed: 0
         };
     }
 
@@ -125,6 +127,253 @@ class PumpSwapService {
         } catch (error) {
             logger.error('❌ Anchor initialization failed:', error.message);
             return false;
+        }
+    }
+
+    // 🔥 NEW: Parse BuyEvent from transaction to get exact amounts
+    async parseBuyEventFromTransaction(signature) {
+        try {
+            const tx = await this.connection.getTransaction(signature, {
+                commitment: 'confirmed',
+                maxSupportedTransactionVersion: 0
+            });
+            
+            if (!tx || !tx.meta) {
+                throw new Error('Transaction not found or incomplete');
+            }
+
+            // Find the BuyEvent in the transaction logs
+            const buyEventDiscriminator = [103, 244, 82, 31, 44, 245, 119, 119]; // From IDL
+            
+            // Look for PumpSwap program logs
+            const programLogs = tx.meta.logMessages?.filter(log => 
+                log.includes('Program log:') && log.includes('data:')
+            ) || [];
+
+            for (const log of programLogs) {
+                try {
+                    // Extract base64 data from log
+                    const dataMatch = log.match(/Program log: data: (.+)/);
+                    if (!dataMatch) continue;
+
+                    const eventData = Buffer.from(dataMatch[1], 'base64');
+                    
+                    // Check if this matches BuyEvent discriminator
+                    const discriminator = eventData.slice(0, 8);
+                    if (Buffer.compare(discriminator, Buffer.from(buyEventDiscriminator)) === 0) {
+                        // Parse the BuyEvent data
+                        return this.parseBuyEventData(eventData);
+                    }
+                } catch (parseError) {
+                    // Continue to next log if this one failed to parse
+                    continue;
+                }
+            }
+
+            // Fallback: parse from inner instructions if event logs not found
+            return await this.parseBuyFromInnerInstructions(tx);
+            
+        } catch (error) {
+            logger.error('Error parsing buy event:', error.message);
+            return null;
+        }
+    }
+
+    // 🔥 NEW: Parse BuyEvent data structure
+    parseBuyEventData(eventData) {
+        try {
+            // Skip 8-byte discriminator
+            let offset = 8;
+            
+            // Parse fields according to BuyEvent structure from IDL
+            const timestamp = eventData.readBigInt64LE(offset); offset += 8;
+            const baseAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
+            const maxQuoteAmountIn = eventData.readBigUInt64LE(offset); offset += 8;
+            
+            // Skip user reserves (we don't need them)
+            offset += 16; // user_base_token_reserves + user_quote_token_reserves
+            
+            // Skip pool reserves  
+            offset += 16; // pool_base_token_reserves + pool_quote_token_reserves
+            
+            const quoteAmountIn = eventData.readBigUInt64LE(offset); offset += 8;
+            
+            // Skip fee fields
+            offset += 32; // lp_fee_basis_points + lp_fee + protocol_fee_basis_points + protocol_fee
+            
+            const quoteAmountInWithLpFee = eventData.readBigUInt64LE(offset); offset += 8;
+            const userQuoteAmountIn = eventData.readBigUInt64LE(offset); offset += 8;
+
+            return {
+                exactTokensReceived: Number(baseAmountOut) / 1e6, // Assuming 6 decimals for tokens
+                exactSolSpent: Number(userQuoteAmountIn) / 1e9,   // Convert lamports to SOL
+                totalSolWithFees: Number(quoteAmountIn) / 1e9,    // Total including LP fees
+                maxSolRequested: Number(maxQuoteAmountIn) / 1e9,
+                timestamp: Number(timestamp),
+                success: true
+            };
+            
+        } catch (error) {
+            logger.error('Error parsing BuyEvent data:', error.message);
+            return null;
+        }
+    }
+
+    // 🔥 NEW: Fallback: parse from inner instructions and balance changes
+    async parseBuyFromInnerInstructions(tx) {
+        try {
+            const preBalances = tx.meta.preBalances;
+            const postBalances = tx.meta.postBalances;
+            
+            if (!preBalances || !postBalances || preBalances.length !== postBalances.length) {
+                throw new Error('Balance data incomplete');
+            }
+
+            // Calculate SOL difference for the user (first account)
+            const solDifference = (preBalances[0] - postBalances[0]) / 1e9;
+            const transactionFee = (tx.meta.fee || 0) / 1e9;
+            const actualSolSpent = solDifference - transactionFee;
+
+            // Parse token transfers from inner instructions
+            let tokensReceived = 0;
+            
+            if (tx.meta.innerInstructions) {
+                for (const innerIx of tx.meta.innerInstructions) {
+                    for (const ix of innerIx.instructions) {
+                        // Look for token transfer instructions
+                        if (ix.programIdIndex === tx.transaction.message.accountKeys.findIndex(
+                            key => key.toString() === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+                        )) {
+                            // Parse transfer instruction data
+                            const transferData = Buffer.from(ix.data, 'base64');
+                            if (transferData[0] === 3) { // Transfer instruction discriminator
+                                const amount = transferData.readBigUInt64LE(1);
+                                tokensReceived = Number(amount) / 1e6; // Assuming 6 decimals
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return {
+                exactTokensReceived: tokensReceived,
+                exactSolSpent: actualSolSpent,
+                totalSolWithFees: actualSolSpent,
+                maxSolRequested: actualSolSpent,
+                timestamp: Date.now(),
+                success: true,
+                fallbackMethod: true
+            };
+            
+        } catch (error) {
+            logger.error('Error parsing from inner instructions:', error.message);
+            return null;
+        }
+    }
+
+    // 🔥 NEW: Parse SellEvent from transaction
+    async parseSellEventFromTransaction(signature) {
+        try {
+            const tx = await this.connection.getTransaction(signature, {
+                commitment: 'confirmed',
+                maxSupportedTransactionVersion: 0
+            });
+            
+            if (!tx || !tx.meta) {
+                throw new Error('Transaction not found or incomplete');
+            }
+
+            const sellEventDiscriminator = [62, 47, 55, 10, 165, 3, 220, 42]; // From IDL
+            
+            const programLogs = tx.meta.logMessages?.filter(log => 
+                log.includes('Program log:') && log.includes('data:')
+            ) || [];
+
+            for (const log of programLogs) {
+                try {
+                    const dataMatch = log.match(/Program log: data: (.+)/);
+                    if (!dataMatch) continue;
+
+                    const eventData = Buffer.from(dataMatch[1], 'base64');
+                    const discriminator = eventData.slice(0, 8);
+                    
+                    if (Buffer.compare(discriminator, Buffer.from(sellEventDiscriminator)) === 0) {
+                        return this.parseSellEventData(eventData);
+                    }
+                } catch (parseError) {
+                    continue;
+                }
+            }
+
+            return await this.parseSellFromInnerInstructions(tx);
+            
+        } catch (error) {
+            logger.error('Error parsing sell event:', error.message);
+            return null;
+        }
+    }
+
+    // 🔥 NEW: Parse SellEvent data (similar structure to BuyEvent)
+    parseSellEventData(eventData) {
+        try {
+            let offset = 8; // Skip discriminator
+            
+            const timestamp = eventData.readBigInt64LE(offset); offset += 8;
+            const baseAmountIn = eventData.readBigUInt64LE(offset); offset += 8;
+            const minQuoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
+            
+            // Skip reserves
+            offset += 32;
+            
+            const quoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
+            
+            // Skip fee data
+            offset += 32;
+            
+            const userQuoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
+
+            return {
+                exactTokensSold: Number(baseAmountIn) / 1e6,
+                exactSolReceived: Number(userQuoteAmountOut) / 1e9,
+                totalSolBeforeFees: Number(quoteAmountOut) / 1e9,
+                timestamp: Number(timestamp),
+                success: true
+            };
+            
+        } catch (error) {
+            logger.error('Error parsing SellEvent data:', error.message);
+            return null;
+        }
+    }
+
+    // 🔥 NEW: Fallback sell parsing
+    async parseSellFromInnerInstructions(tx) {
+        try {
+            const preBalances = tx.meta.preBalances;
+            const postBalances = tx.meta.postBalances;
+            
+            if (!preBalances || !postBalances || preBalances.length !== postBalances.length) {
+                throw new Error('Balance data incomplete');
+            }
+
+            // Calculate SOL difference for the user (first account)
+            const solDifference = (postBalances[0] - preBalances[0]) / 1e9;
+            const transactionFee = (tx.meta.fee || 0) / 1e9;
+            const actualSolReceived = solDifference - transactionFee;
+
+            return {
+                exactTokensSold: 0, // Would need more complex parsing
+                exactSolReceived: actualSolReceived,
+                totalSolBeforeFees: actualSolReceived,
+                timestamp: Date.now(),
+                success: true,
+                fallbackMethod: true
+            };
+            
+        } catch (error) {
+            logger.error('Error parsing sell from inner instructions:', error.message);
+            return null;
         }
     }
 
@@ -215,88 +464,6 @@ class PumpSwapService {
         }
     }
 
-    // 🔥 METHOD 2: Alternative seed structure
-    async derivePoolMethod2(mintPubkey) {
-        try {
-            logger.debug(`🔧 Method 2: Alternative seed derivation`);
-            
-            // Try different seed combinations
-            const alternatives = [
-                [Buffer.from("pool"), mintPubkey.toBytes(), this.WSOL_MINT.toBytes()],
-                [Buffer.from("amm"), mintPubkey.toBytes(), this.WSOL_MINT.toBytes()],
-                [Buffer.from("swap"), mintPubkey.toBytes(), this.WSOL_MINT.toBytes()]
-            ];
-            
-            for (let i = 0; i < alternatives.length; i++) {
-                const [poolPda] = PublicKey.findProgramAddressSync(
-                    alternatives[i],
-                    this.PUMPSWAP_PROGRAM_ID
-                );
-                
-                logger.debug(`   Alternative ${i + 1}: ${poolPda.toString()}`);
-                
-                const poolAccountInfo = await this.connection.getAccountInfo(poolPda);
-                if (poolAccountInfo) {
-                    this.stats.poolsFound++;
-                    logger.info(`✅ Method 2 SUCCESS: Alternative ${i + 1} exists`);
-                    return poolPda;
-                }
-            }
-            
-            logger.debug(`❌ Method 2: No alternative derivations found`);
-            return null;
-            
-        } catch (error) {
-            logger.debug(`❌ Method 2 failed: ${error.message}`);
-            return null;
-        }
-    }
-
-    // 🔥 METHOD 3: Try multiple pool indices
-    async derivePoolWithIndices(mintPubkey) {
-        try {
-            logger.debug(`🔧 Method 3: Multiple pool indices`);
-            
-            const [poolAuthority] = PublicKey.findProgramAddressSync(
-                [Buffer.from("pool-authority"), mintPubkey.toBytes()],
-                this.PUMP_PROGRAM_ID
-            );
-            
-            // Try indices 0-5
-            for (let index = 0; index <= 5; index++) {
-                const poolIndexBuffer = Buffer.alloc(2);
-                poolIndexBuffer.writeUInt16LE(index, 0);
-                
-                const [poolPda] = PublicKey.findProgramAddressSync(
-                    [
-                        Buffer.from("pool"),
-                        poolIndexBuffer,
-                        poolAuthority.toBytes(),
-                        mintPubkey.toBytes(),
-                        this.WSOL_MINT.toBytes()
-                    ],
-                    this.PUMPSWAP_PROGRAM_ID
-                );
-                
-                logger.debug(`   Index ${index}: ${poolPda.toString()}`);
-                
-                const poolAccountInfo = await this.connection.getAccountInfo(poolPda);
-                if (poolAccountInfo) {
-                    this.stats.poolsFound++;
-                    logger.info(`✅ Method 3 SUCCESS: Index ${index} exists`);
-                    return poolPda;
-                }
-            }
-            
-            logger.debug(`❌ Method 3: No indices 0-5 found`);
-            return null;
-            
-        } catch (error) {
-            logger.debug(`❌ Method 3 failed: ${error.message}`);
-            return null;
-        }
-    }
-
     async getPoolCoinCreator(poolAddress) {
         try {
             const poolAccountInfo = await this.connection.getAccountInfo(poolAddress);
@@ -368,6 +535,7 @@ class PumpSwapService {
         }
     }
 
+    // 🔥 ENHANCED: executeBuy with exact amount parsing
     async executeBuy(tokenMint, solAmount, customSlippage = null) {
         try {
             if (!this.wallet || !this.program) {
@@ -540,16 +708,47 @@ class PumpSwapService {
             logger.info(`   Pool Used: ${poolAddress.toString()}`);
             logger.info(`   Explorer: https://solscan.io/tx/${signature}`);
 
-            return {
-                success: true,
-                signature: signature,
-                solSpent: solAmount,
-                tokensReceived: expectedTokensOut,
-                poolAddress: poolAddress.toString(),
-                calculatedPrice: currentPrice,
-                type: 'BUY',
-                slippageUsed: slippageToUse
-            };
+            // 🔥 NEW: Parse exact amounts from transaction
+            const exactAmounts = await this.parseBuyEventFromTransaction(signature);
+            
+            if (exactAmounts && exactAmounts.success) {
+                this.stats.exactAmountsParsed++;
+                logger.info(`✅ EXACT AMOUNTS PARSED:`);
+                logger.info(`   SOL Spent: ${exactAmounts.exactSolSpent.toFixed(6)} SOL`);
+                logger.info(`   Tokens Received: ${exactAmounts.exactTokensReceived.toLocaleString()} tokens`);
+                logger.info(`   Effective Price: ${(exactAmounts.exactSolSpent / exactAmounts.exactTokensReceived).toFixed(12)} SOL per token`);
+                
+                return {
+                    success: true,
+                    signature: signature,
+                    // 🔥 EXACT AMOUNTS from blockchain events
+                    solSpent: exactAmounts.exactSolSpent,
+                    tokensReceived: exactAmounts.exactTokensReceived,
+                    // Original calculated amounts for comparison
+                    estimatedSolSpent: solAmount,
+                    estimatedTokensReceived: expectedTokensOut,
+                    poolAddress: poolAddress.toString(),
+                    calculatedPrice: exactAmounts.exactSolSpent / exactAmounts.exactTokensReceived,
+                    type: 'BUY',
+                    slippageUsed: slippageToUse,
+                    exactData: exactAmounts
+                };
+            } else {
+                // Fallback to original estimates if parsing fails
+                this.stats.estimatesUsed++;
+                logger.warn('⚠️ Could not parse exact amounts, using estimates');
+                return {
+                    success: true,
+                    signature: signature,
+                    solSpent: solAmount, // Estimate
+                    tokensReceived: expectedTokensOut, // Estimate
+                    poolAddress: poolAddress.toString(),
+                    calculatedPrice: currentPrice,
+                    type: 'BUY',
+                    slippageUsed: slippageToUse,
+                    exactData: null
+                };
+            }
 
         } catch (error) {
             this.stats.errors++;
@@ -558,6 +757,7 @@ class PumpSwapService {
         }
     }
 
+    // 🔥 ENHANCED: executeSell with exact amount parsing
     async executeSell(tokenMint, tokenAmount, customSlippage = null) {
         try {
             if (!this.wallet || !this.program) {
@@ -694,28 +894,87 @@ class PumpSwapService {
             }, 'confirmed');
     
             this.stats.sellsExecuted++;
-            const solReceived = parseFloat(expectedSolOutput.toString()) / 1e9;
-    
+
             logger.info(`✅ SELL SUCCESS!`);
             logger.info(`   Signature: ${signature}`);
             logger.info(`   Pool Used: ${poolAddress.toString()}`);
-            logger.info(`   SOL Received: ~${solReceived.toFixed(6)} SOL (automatically unwrapped)`);
             logger.info(`   Explorer: https://solscan.io/tx/${signature}`);
-    
-            return {
-                success: true,
-                signature: signature,
-                solReceived: solReceived,
-                tokensSpent: tokenAmount,
-                poolAddress: poolAddress.toString(),
-                type: 'SELL',
-                unwrapped: true,
-                slippageUsed: slippageToUse
-            };
+
+            // 🔥 NEW: Parse exact amounts from sell transaction
+            const exactAmounts = await this.parseSellEventFromTransaction(signature);
+            
+            if (exactAmounts && exactAmounts.success) {
+                this.stats.exactAmountsParsed++;
+                logger.info(`✅ EXACT SELL AMOUNTS PARSED:`);
+                logger.info(`   Tokens Sold: ${exactAmounts.exactTokensSold.toLocaleString()} tokens`);
+                logger.info(`   SOL Received: ${exactAmounts.exactSolReceived.toFixed(6)} SOL`);
+                
+                return {
+                    success: true,
+                    signature: signature,
+                    solReceived: exactAmounts.exactSolReceived,
+                    tokensSpent: exactAmounts.exactTokensSold,
+                    poolAddress: poolAddress.toString(),
+                    type: 'SELL',
+                    unwrapped: true,
+                    slippageUsed: slippageToUse,
+                    exactData: exactAmounts
+                };
+            } else {
+                // Fallback to estimates
+                this.stats.estimatesUsed++;
+                const solReceived = parseFloat(expectedSolOutput.toString()) / 1e9;
+                logger.warn('⚠️ Could not parse exact sell amounts, using estimates');
+                
+                return {
+                    success: true,
+                    signature: signature,
+                    solReceived: solReceived,
+                    tokensSpent: tokenAmount,
+                    poolAddress: poolAddress.toString(),
+                    type: 'SELL',
+                    unwrapped: true,
+                    slippageUsed: slippageToUse,
+                    exactData: null
+                };
+            }
     
         } catch (error) {
             this.stats.errors++;
             logger.error('❌ Sell failed:', error.message);
+            throw error;
+        }
+    }
+
+    async updatePositionAfterSell(positionId, actualTokensSold, actualSolReceived, actualPnL, signature, reason) {
+        try {
+            const position = this.positions.get(positionId);
+            if (!position) {
+                logger.error(`Position ${positionId} not found for update after sell`);
+                return;
+            }
+    
+            logger.info(`📊 UPDATING POSITION AFTER SELL: ${position.symbol}`);
+            logger.info(`   Actual tokens sold: ${actualTokensSold.toLocaleString()}`);
+            logger.info(`   Actual SOL received: ${actualSolReceived.toFixed(6)} SOL`);
+            logger.info(`   Actual PnL: ${actualPnL >= 0 ? '+' : ''}${actualPnL.toFixed(6)} SOL`);
+    
+            // Update position data with exact amounts
+            const sellData = {
+                tokenAmount: actualTokensSold,
+                solReceived: actualSolReceived,
+                pnl: actualPnL,
+                signature: signature,
+                reason: reason
+            };
+    
+            // Call completeSell with exact data
+            await this.completeSell(positionId, sellData);
+    
+            logger.info(`✅ Position ${position.symbol} updated with exact sell data`);
+    
+        } catch (error) {
+            logger.error(`❌ Failed to update position after sell: ${error.message}`);
             throw error;
         }
     }
@@ -839,7 +1098,9 @@ class PumpSwapService {
             successRate: this.stats.poolsDerivied > 0 ? 
                 ((this.stats.poolsFound / this.stats.poolsDerivied) * 100).toFixed(1) + '%' : '0%',
             retrySuccessRate: this.stats.retryAttempts > 0 ?
-                ((this.stats.poolsFound / (this.stats.poolsDerivied + this.stats.retryAttempts)) * 100).toFixed(1) + '%' : 'N/A'
+                ((this.stats.poolsFound / (this.stats.poolsDerivied + this.stats.retryAttempts)) * 100).toFixed(1) + '%' : 'N/A',
+            exactParsingRate: (this.stats.buysExecuted + this.stats.sellsExecuted) > 0 ?
+                ((this.stats.exactAmountsParsed / (this.stats.buysExecuted + this.stats.sellsExecuted)) * 100).toFixed(1) + '%' : '0%'
         };
     }
 }
