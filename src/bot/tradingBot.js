@@ -16,9 +16,18 @@ class TradingBot extends EventEmitter {
             slippageTolerance: parseFloat(process.env.SLIPPAGE_TOLERANCE) || 30,
             privateKey: process.env.PRIVATE_KEY,
             takeProfitLevels: [
-                { percentage: 100, sellPercentage: 50 },  // 2x - sell 50%
-                { percentage: 300, sellPercentage: 25 },  // 4x - sell 25%
-                { percentage: 900, sellPercentage: 12.5 }  // 10x - sell 12.5% (keep rest)
+                { 
+                    percentage: parseFloat(process.env.TAKE_PROFIT_1_PERCENTAGE) || 100, 
+                    sellPercentage: parseFloat(process.env.TAKE_PROFIT_1_SELL_PERCENTAGE) || 50 
+                },
+                { 
+                    percentage: parseFloat(process.env.TAKE_PROFIT_2_PERCENTAGE) || 300, 
+                    sellPercentage: parseFloat(process.env.TAKE_PROFIT_2_SELL_PERCENTAGE) || 25 
+                },
+                { 
+                    percentage: parseFloat(process.env.TAKE_PROFIT_3_PERCENTAGE) || 900, 
+                    sellPercentage: parseFloat(process.env.TAKE_PROFIT_3_SELL_PERCENTAGE) || 100 
+                }
             ]
         };
 

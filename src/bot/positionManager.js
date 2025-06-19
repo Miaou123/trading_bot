@@ -707,6 +707,151 @@ class PositionManager extends EventEmitter {
         }
     }
 
+    async updatePositionAfterSell(positionId, tokensSold, solReceived, pnl, signature, reason) {
+        try {
+            const position = this.positions.get(positionId);
+            if (!position) {
+                logger.error(`Position ${positionId} not found for update after sell`);
+                return;
+            }
+    
+            logger.info(`🔄 UPDATING POSITION AFTER SELL: ${position.symbol}`);
+            logger.info(`   Tokens Sold: ${tokensSold.toLocaleString()}`);
+            logger.info(`   SOL Received: ${solReceived.toFixed(6)} SOL`);
+            logger.info(`   PnL: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(6)} SOL`);
+            logger.info(`   Signature: ${signature}`);
+    
+            // Calculate new remaining quantity using EXACT transaction data
+            const currentRemainingQuantity = parseFloat(position.remainingQuantity);
+            const newRemainingQuantity = currentRemainingQuantity - tokensSold;
+            
+            // Calculate percentages
+            const originalQuantity = parseFloat(position.quantity);
+            const soldPercentageOfOriginal = (tokensSold / originalQuantity) * 100;
+            const remainingPercentageOfOriginal = (newRemainingQuantity / originalQuantity) * 100;
+            const soldPercentageOfRemaining = (tokensSold / currentRemainingQuantity) * 100;
+    
+            logger.info(`📊 POSITION UPDATE CALCULATIONS:`);
+            logger.info(`   Original Quantity: ${originalQuantity.toLocaleString()} tokens`);
+            logger.info(`   Previous Remaining: ${currentRemainingQuantity.toLocaleString()} tokens`);
+            logger.info(`   Tokens Sold: ${tokensSold.toLocaleString()} tokens (${soldPercentageOfRemaining.toFixed(1)}% of remaining)`);
+            logger.info(`   New Remaining: ${newRemainingQuantity.toLocaleString()} tokens (${remainingPercentageOfOriginal.toFixed(1)}% of original)`);
+    
+            // Update position with new remaining quantity
+            const updatedPosition = {
+                ...position,
+                remainingQuantity: newRemainingQuantity.toString(),
+                totalRealizedPnL: (position.totalRealizedPnL || 0) + pnl,
+                partialSells: (position.partialSells || []).concat({
+                    timestamp: Date.now(),
+                    soldQuantity: tokensSold,
+                    solReceived: solReceived,
+                    pnl: pnl,
+                    reason: reason,
+                    signature: signature,
+                    soldPercentageOfOriginal: soldPercentageOfOriginal,
+                    soldPercentageOfRemaining: soldPercentageOfRemaining,
+                    remainingAfterSell: newRemainingQuantity
+                }),
+                updatedAt: Date.now(),
+                lastSellAt: Date.now(),
+                status: newRemainingQuantity > 0.001 ? 'ACTIVE' : 'CLOSED' // Close if very small amount remaining
+            };
+    
+            // Clear any pending transaction data since we're completing the transaction
+            delete updatedPosition.pendingReason;
+            delete updatedPosition.pendingSellPercentage;
+            delete updatedPosition.pendingStartTime;
+            delete updatedPosition.pendingTxHash;
+            delete updatedPosition.pendingTokenAmount;
+            updatedPosition.retryCount = 0;
+            delete updatedPosition.lastRetryError;
+            delete updatedPosition.lastRetryReason;
+    
+            // If position is effectively closed, handle it
+            if (newRemainingQuantity <= 0.001 || remainingPercentageOfOriginal < 0.1) {
+                logger.info(`✅ POSITION FULLY CLOSED: ${position.symbol}`);
+                updatedPosition.status = 'CLOSED';
+                updatedPosition.closedAt = Date.now();
+                updatedPosition.closeReason = reason;
+                updatedPosition.remainingQuantity = "0";
+                
+                // Move to trade history
+                await this.movePositionToHistory(updatedPosition);
+                this.positions.delete(positionId);
+                
+                this.emit('positionClosed', updatedPosition);
+            } else {
+                // Keep position active
+                this.positions.set(positionId, updatedPosition);
+                
+                this.emit('partialSell', {
+                    position: updatedPosition,
+                    sellData: {
+                        tokenAmount: tokensSold,
+                        solReceived: solReceived,
+                        pnl: pnl,
+                        signature: signature,
+                        reason: reason
+                    },
+                    remainingPercentage: remainingPercentageOfOriginal
+                });
+            }
+    
+            await this.savePositions();
+    
+            // 🔥 Send Telegram notification with EXACT transaction data
+            if (this.telegramService && this.telegramService.isEnabled()) {
+                try {
+                    // Check if this was a take profit sell by looking at the reason
+                    const tpMatch = reason.match(/Take Profit (\d+)/);
+                    if (tpMatch) {
+                        const tpLevel = parseInt(tpMatch[1]);
+                        const gainPercentage = ((position.currentPrice - position.entryPrice) / position.entryPrice * 100);
+                        
+                        // Get trailing stop loss info if available
+                        let trailingStopLoss = null;
+                        if (position.pendingTakeProfitData && position.pendingTakeProfitData.trailingStopLoss) {
+                            trailingStopLoss = position.pendingTakeProfitData.trailingStopLoss;
+                        }
+                        
+                        const tpData = {
+                            level: tpLevel,
+                            triggerPrice: position.currentPrice,
+                            gainPercentage: gainPercentage,
+                            sellPercentage: soldPercentageOfRemaining,
+                            tokensSold: tokensSold,
+                            solReceived: solReceived,
+                            transactionPnL: pnl,
+                            priceSource: position.lastPriceSource,
+                            executionMode: this.config.tradingMode,
+                            trailingStopLoss: trailingStopLoss
+                        };
+    
+                        await this.telegramService.sendTakeProfitAlert(updatedPosition, tpData);
+                        
+                        // Clear pending TP data after sending alert
+                        if (updatedPosition.pendingTakeProfitData) {
+                            delete updatedPosition.pendingTakeProfitData;
+                            this.positions.set(positionId, updatedPosition);
+                            await this.savePositions();
+                        }
+                    }
+                } catch (error) {
+                    logger.error('❌ Failed to send Telegram alert:', error.message);
+                }
+            }
+    
+            logger.info(`✅ POSITION UPDATE COMPLETED: ${position.symbol}`);
+            logger.info(`   Total Realized PnL: ${updatedPosition.totalRealizedPnL.toFixed(6)} SOL`);
+            logger.info(`   Remaining: ${newRemainingQuantity.toLocaleString()} tokens (${remainingPercentageOfOriginal.toFixed(1)}% of original)`);
+            
+        } catch (error) {
+            logger.error(`❌ Failed to update position after sell: ${error.message}`);
+            throw error;
+        }
+    }
+
     // Move position to manual review in trade history
     async moveToManualReview(position, reason) {
         position.status = 'MANUAL_REVIEW_NEEDED';

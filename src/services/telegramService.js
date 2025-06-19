@@ -132,8 +132,8 @@ class TelegramService {
 
         const message = `${modeEmoji} *NEW POSITION OPENED*\n\n` +
                        `🪙 **${position.symbol}**\n` +
-                       `📋 Address: \`${position.tokenAddress}\`\n` +
-                       `📈 [DexScreener Chart](https://dexscreener.com/solana/${position.tokenAddress})\n\n` +
+                       `📋 \`${position.tokenAddress}\`\n` +
+                       `📈 [Chart](https://dexscreener.com/solana/${position.tokenAddress})\n\n` +
                        
                        `💰 Investment: ${investmentFormatted}\n` +
                        `📊 Entry Price: ${entryPriceFormatted}\n` +
@@ -154,30 +154,46 @@ class TelegramService {
         await this.sendMessage(message);
     }
 
-    // 🔥 UPDATED: Enhanced take profit alert with USD amounts
     async sendTakeProfitAlert(position, tpData) {
         if (!this.isInitialized) return;
-
+    
         const modeEmoji = this.config.tradingMode === 'live' ? '🔴' : '📝';
-        const remainingPercentage = (parseFloat(position.remainingQuantity) / parseFloat(position.quantity) * 100);
+        
+        // Get transaction details from tpData (passed from position manager)
+        const tokensSold = tpData.tokensSold || 0;
+        const solReceived = tpData.solReceived || 0;
+        const transactionPnL = tpData.transactionPnL || 0;
+        
+        // Calculate remaining amounts AFTER the sell
+        const originalQuantity = parseFloat(position.quantity);
+        const remainingQuantity = parseFloat(position.remainingQuantity);
+        const remainingPercentage = (remainingQuantity / originalQuantity) * 100;
+        
+        // Calculate current values
         const totalInvested = position.investedAmount;
-        const currentValue = parseFloat(position.remainingQuantity) * position.currentPrice;
-        const totalPnL = (position.totalRealizedPnL || 0) + (currentValue - (totalInvested * remainingPercentage / 100));
+        const currentValue = remainingQuantity * position.currentPrice;
+        const totalRealizedPnL = (position.totalRealizedPnL || 0);
+        const totalUnrealizedPnL = currentValue - (totalInvested * remainingPercentage / 100);
+        const totalPnL = totalRealizedPnL + totalUnrealizedPnL;
         const pnlPercentage = (totalPnL / totalInvested) * 100;
-
+    
         // Format amounts with USD
         const triggerPriceFormatted = await this.formatTokenPrice(tpData.triggerPrice);
+        const tokensSoldFormatted = tokensSold.toLocaleString();
+        const solReceivedFormatted = await this.formatSolWithUSD(solReceived);
         const currentValueFormatted = await this.formatSolWithUSD(currentValue);
         const totalPnLFormatted = await this.formatSolWithUSD(Math.abs(totalPnL));
-
+    
         const message = `${modeEmoji} *TAKE PROFIT HIT!* 🎯\n\n` +
                        `🪙 **${position.symbol}** (${position.tokenAddress.slice(0, 8)}...)\n` +
                        `📊 TP${tpData.level} triggered at ${triggerPriceFormatted}\n` +
-                       `💹 Gain: **+${tpData.gainPercentage.toFixed(1)}%**\n` +
-                       `📤 Sold: ${tpData.sellPercentage}% of remaining position\n\n` +
+                       `💹 Gain: **+${tpData.gainPercentage.toFixed(1)}%**\n\n` +
+                       
+                       `**📤 Transaction Recap:**\n` +
+                       `• Sold: \`${tokensSoldFormatted}\` **${position.symbol}**  for ${solReceivedFormatted}\n` +
                        
                        `**💰 Current Bag:**\n` +
-                       `• Remaining: \`${parseFloat(position.remainingQuantity).toLocaleString()}\` tokens (${remainingPercentage.toFixed(1)}% of original)\n` +
+                       `• Remaining: \`${remainingQuantity.toLocaleString()}\` tokens (${remainingPercentage.toFixed(1)}% of original)\n` +
                        `• Current Value: ${currentValueFormatted}\n` +
                        `• Total PnL: ${totalPnL >= 0 ? '+' : '-'}${totalPnLFormatted} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)\n\n` +
                        
@@ -189,7 +205,7 @@ class TelegramService {
                            : `• Current: ${await this.formatTokenPrice(position.stopLossPrice)}\n\n`) +
                        
                        `⏰ ${new Date().toLocaleString()}`;
-
+    
         await this.sendMessage(message);
     }
 
