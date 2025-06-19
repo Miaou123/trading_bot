@@ -1,4 +1,4 @@
-// src/services/pumpSwapService.js - ENHANCED: With exact transaction amount parsing
+// src/services/pumpSwapService.js - FIXED: Complete service with corrected event parsing
 const { Connection, PublicKey, Keypair, VersionedTransaction, TransactionMessage, SystemProgram, ComputeBudgetProgram } = require('@solana/web3.js');
 const { AccountLayout, NATIVE_MINT, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 const { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createCloseAccountInstruction } = require('@solana/spl-token');
@@ -27,6 +27,7 @@ class PumpSwapService {
             retryDelay: config.retryDelay || 1000,
             ...config
         };
+        
         // PumpSwap program constants
         this.PUMPSWAP_PROGRAM_ID = new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA');
         this.PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
@@ -122,7 +123,7 @@ class PumpSwapService {
             );
 
             this.program = new anchor.Program(this.idl, provider);
-            logger.info('✅ Anchor program initialized for real trading');
+            logger.info('✅ Anchor program initialized');
             return true;
         } catch (error) {
             logger.error('❌ Anchor initialization failed:', error.message);
@@ -130,266 +131,46 @@ class PumpSwapService {
         }
     }
 
-    // 🔥 NEW: Parse BuyEvent from transaction to get exact amounts
-    async parseBuyEventFromTransaction(signature) {
-        try {
-            const tx = await this.connection.getTransaction(signature, {
-                commitment: 'confirmed',
-                maxSupportedTransactionVersion: 0
-            });
-            
-            if (!tx || !tx.meta) {
-                throw new Error('Transaction not found or incomplete');
-            }
-
-            // Find the BuyEvent in the transaction logs
-            const buyEventDiscriminator = [103, 244, 82, 31, 44, 245, 119, 119]; // From IDL
-            
-            // Look for PumpSwap program logs
-            const programLogs = tx.meta.logMessages?.filter(log => 
-                log.includes('Program log:') && log.includes('data:')
-            ) || [];
-
-            for (const log of programLogs) {
-                try {
-                    // Extract base64 data from log
-                    const dataMatch = log.match(/Program log: data: (.+)/);
-                    if (!dataMatch) continue;
-
-                    const eventData = Buffer.from(dataMatch[1], 'base64');
-                    
-                    // Check if this matches BuyEvent discriminator
-                    const discriminator = eventData.slice(0, 8);
-                    if (Buffer.compare(discriminator, Buffer.from(buyEventDiscriminator)) === 0) {
-                        // Parse the BuyEvent data
-                        return this.parseBuyEventData(eventData);
-                    }
-                } catch (parseError) {
-                    // Continue to next log if this one failed to parse
-                    continue;
-                }
-            }
-
-            // Fallback: parse from inner instructions if event logs not found
-            return await this.parseBuyFromInnerInstructions(tx);
-            
-        } catch (error) {
-            logger.error('Error parsing buy event:', error.message);
-            return null;
-        }
-    }
-
-    // 🔥 NEW: Parse BuyEvent data structure
-    parseBuyEventData(eventData) {
-        try {
-            // Skip 8-byte discriminator
-            let offset = 8;
-            
-            // Parse fields according to BuyEvent structure from IDL
-            const timestamp = eventData.readBigInt64LE(offset); offset += 8;
-            const baseAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
-            const maxQuoteAmountIn = eventData.readBigUInt64LE(offset); offset += 8;
-            
-            // Skip user reserves (we don't need them)
-            offset += 16; // user_base_token_reserves + user_quote_token_reserves
-            
-            // Skip pool reserves  
-            offset += 16; // pool_base_token_reserves + pool_quote_token_reserves
-            
-            const quoteAmountIn = eventData.readBigUInt64LE(offset); offset += 8;
-            
-            // Skip fee fields
-            offset += 32; // lp_fee_basis_points + lp_fee + protocol_fee_basis_points + protocol_fee
-            
-            const quoteAmountInWithLpFee = eventData.readBigUInt64LE(offset); offset += 8;
-            const userQuoteAmountIn = eventData.readBigUInt64LE(offset); offset += 8;
-
-            return {
-                exactTokensReceived: Number(baseAmountOut) / 1e6, // Assuming 6 decimals for tokens
-                exactSolSpent: Number(userQuoteAmountIn) / 1e9,   // Convert lamports to SOL
-                totalSolWithFees: Number(quoteAmountIn) / 1e9,    // Total including LP fees
-                maxSolRequested: Number(maxQuoteAmountIn) / 1e9,
-                timestamp: Number(timestamp),
-                success: true
-            };
-            
-        } catch (error) {
-            logger.error('Error parsing BuyEvent data:', error.message);
-            return null;
-        }
-    }
-
-    // 🔥 NEW: Fallback: parse from inner instructions and balance changes
-    async parseBuyFromInnerInstructions(tx) {
-        try {
-            const preBalances = tx.meta.preBalances;
-            const postBalances = tx.meta.postBalances;
-            
-            if (!preBalances || !postBalances || preBalances.length !== postBalances.length) {
-                throw new Error('Balance data incomplete');
-            }
-
-            // Calculate SOL difference for the user (first account)
-            const solDifference = (preBalances[0] - postBalances[0]) / 1e9;
-            const transactionFee = (tx.meta.fee || 0) / 1e9;
-            const actualSolSpent = solDifference - transactionFee;
-
-            // Parse token transfers from inner instructions
-            let tokensReceived = 0;
-            
-            if (tx.meta.innerInstructions) {
-                for (const innerIx of tx.meta.innerInstructions) {
-                    for (const ix of innerIx.instructions) {
-                        // Look for token transfer instructions
-                        if (ix.programIdIndex === tx.transaction.message.accountKeys.findIndex(
-                            key => key.toString() === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
-                        )) {
-                            // Parse transfer instruction data
-                            const transferData = Buffer.from(ix.data, 'base64');
-                            if (transferData[0] === 3) { // Transfer instruction discriminator
-                                const amount = transferData.readBigUInt64LE(1);
-                                tokensReceived = Number(amount) / 1e6; // Assuming 6 decimals
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            return {
-                exactTokensReceived: tokensReceived,
-                exactSolSpent: actualSolSpent,
-                totalSolWithFees: actualSolSpent,
-                maxSolRequested: actualSolSpent,
-                timestamp: Date.now(),
-                success: true,
-                fallbackMethod: true
-            };
-            
-        } catch (error) {
-            logger.error('Error parsing from inner instructions:', error.message);
-            return null;
-        }
-    }
-
-    // 🔥 NEW: Parse SellEvent from transaction
-    async parseSellEventFromTransaction(signature) {
-        try {
-            const tx = await this.connection.getTransaction(signature, {
-                commitment: 'confirmed',
-                maxSupportedTransactionVersion: 0
-            });
-            
-            if (!tx || !tx.meta) {
-                throw new Error('Transaction not found or incomplete');
-            }
-
-            const sellEventDiscriminator = [62, 47, 55, 10, 165, 3, 220, 42]; // From IDL
-            
-            const programLogs = tx.meta.logMessages?.filter(log => 
-                log.includes('Program log:') && log.includes('data:')
-            ) || [];
-
-            for (const log of programLogs) {
-                try {
-                    const dataMatch = log.match(/Program log: data: (.+)/);
-                    if (!dataMatch) continue;
-
-                    const eventData = Buffer.from(dataMatch[1], 'base64');
-                    const discriminator = eventData.slice(0, 8);
-                    
-                    if (Buffer.compare(discriminator, Buffer.from(sellEventDiscriminator)) === 0) {
-                        return this.parseSellEventData(eventData);
-                    }
-                } catch (parseError) {
-                    continue;
-                }
-            }
-
-            return await this.parseSellFromInnerInstructions(tx);
-            
-        } catch (error) {
-            logger.error('Error parsing sell event:', error.message);
-            return null;
-        }
-    }
-
-    // 🔥 NEW: Parse SellEvent data (similar structure to BuyEvent)
-    parseSellEventData(eventData) {
-        try {
-            let offset = 8; // Skip discriminator
-            
-            const timestamp = eventData.readBigInt64LE(offset); offset += 8;
-            const baseAmountIn = eventData.readBigUInt64LE(offset); offset += 8;
-            const minQuoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
-            
-            // Skip reserves
-            offset += 32;
-            
-            const quoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
-            
-            // Skip fee data
-            offset += 32;
-            
-            const userQuoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
-
-            return {
-                exactTokensSold: Number(baseAmountIn) / 1e6,
-                exactSolReceived: Number(userQuoteAmountOut) / 1e9,
-                totalSolBeforeFees: Number(quoteAmountOut) / 1e9,
-                timestamp: Number(timestamp),
-                success: true
-            };
-            
-        } catch (error) {
-            logger.error('Error parsing SellEvent data:', error.message);
-            return null;
-        }
-    }
-
-    // 🔥 NEW: Fallback sell parsing
-    async parseSellFromInnerInstructions(tx) {
-        try {
-            const preBalances = tx.meta.preBalances;
-            const postBalances = tx.meta.postBalances;
-            
-            if (!preBalances || !postBalances || preBalances.length !== postBalances.length) {
-                throw new Error('Balance data incomplete');
-            }
-
-            // Calculate SOL difference for the user (first account)
-            const solDifference = (postBalances[0] - preBalances[0]) / 1e9;
-            const transactionFee = (tx.meta.fee || 0) / 1e9;
-            const actualSolReceived = solDifference - transactionFee;
-
-            return {
-                exactTokensSold: 0, // Would need more complex parsing
-                exactSolReceived: actualSolReceived,
-                totalSolBeforeFees: actualSolReceived,
-                timestamp: Date.now(),
-                success: true,
-                fallbackMethod: true
-            };
-            
-        } catch (error) {
-            logger.error('Error parsing sell from inner instructions:', error.message);
-            return null;
-        }
-    }
-
-    // 🔥 ENHANCED: Better pool derivation with multiple methods and detailed logging
+    // 🔥 FIXED: Using the original working pool derivation logic
     async findPool(tokenMint, retryAttempts = 0) {
         try {
             const mintPubkey = new PublicKey(tokenMint);
             
-            // 🔥 METHOD 1: Original PumpSwap derivation (most likely)
-            const method1Pool = await this.derivePoolMethod1(mintPubkey);
-            if (method1Pool) {
-                return method1Pool;
-            }
-        
-            logger.warn(`⚠️ Pool not found with any method (attempt ${retryAttempts + 1})`);
-            this.stats.poolsNotFound++;
+            logger.debug(`🔧 Pool derivation for: ${tokenMint} (attempt ${retryAttempts + 1})`);
+            
+            // 🔥 CORRECT METHOD: Original working derivation logic
+            const [poolAuthority] = PublicKey.findProgramAddressSync(
+                [Buffer.from("pool-authority"), mintPubkey.toBytes()],
+                this.PUMP_PROGRAM_ID  // Uses PUMP_PROGRAM_ID to derive pool authority
+            );
+            
+            logger.debug(`   Pool Authority: ${poolAuthority.toString()}`);
+            
+            const poolIndexBuffer = Buffer.alloc(2);
+            poolIndexBuffer.writeUInt16LE(0, 0);  // Start with index 0
+            
+            const [poolPda] = PublicKey.findProgramAddressSync(
+                [
+                    Buffer.from("pool"),
+                    poolIndexBuffer,
+                    poolAuthority.toBytes(),  // Use derived pool authority as creator
+                    mintPubkey.toBytes(),     // base_mint
+                    this.WSOL_MINT.toBytes()  // quote_mint
+                ],
+                this.PUMPSWAP_PROGRAM_ID
+            );
+            
+            logger.debug(`   Derived Pool: ${poolPda.toString()}`);
+            this.stats.poolsDerivied++;
+            
+            const poolAccountInfo = await this.connection.getAccountInfo(poolPda);
+            if (poolAccountInfo) {
+                this.stats.poolsFound++;
+                logger.debug(`✅ Pool found: ${poolPda.toString()}`);
+                return poolPda;
+            } 
+            
+            logger.debug(`❌ Pool derived but doesn't exist on-chain yet`);
             
             // 🔥 RETRY LOGIC: Keep trying for new migrations
             if (retryAttempts < this.config.maxRetries - 1) {
@@ -400,6 +181,7 @@ class PumpSwapService {
                 return await this.findPool(tokenMint, retryAttempts + 1);
             }
             
+            this.stats.poolsNotFound++;
             logger.error(`❌ Pool not found after ${this.config.maxRetries} attempts`);
             return null;
             
@@ -420,46 +202,300 @@ class PumpSwapService {
         }
     }
 
-    // 🔥 METHOD 1: Original derivation logic
-    async derivePoolMethod1(mintPubkey) {
+    // 🔥 FIXED: Parse BuyEvent data structure with correct field order
+    parseBuyEventData(eventData) {
         try {
-            logger.debug(`🔧 Method 1: Original PumpSwap derivation`);
+            let offset = 8; // Skip discriminator
             
-            const [poolAuthority] = PublicKey.findProgramAddressSync(
-                [Buffer.from("pool-authority"), mintPubkey.toBytes()],
-                this.PUMP_PROGRAM_ID
-            );
+            // Parse fields according to EXACT BuyEvent structure from IDL
+            const timestamp = eventData.readBigInt64LE(offset); offset += 8;
+            const baseAmountOut = eventData.readBigUInt64LE(offset); offset += 8;           // tokens received
+            const maxQuoteAmountIn = eventData.readBigUInt64LE(offset); offset += 8;       // max SOL willing to spend
             
-            logger.debug(`   Pool Authority: ${poolAuthority.toString()}`);
+            // Skip user reserves
+            const userBaseTokenReserves = eventData.readBigUInt64LE(offset); offset += 8;
+            const userQuoteTokenReserves = eventData.readBigUInt64LE(offset); offset += 8;
             
-            const poolIndexBuffer = Buffer.alloc(2);
-            poolIndexBuffer.writeUInt16LE(0, 0);
+            // Skip pool reserves
+            const poolBaseTokenReserves = eventData.readBigUInt64LE(offset); offset += 8;
+            const poolQuoteTokenReserves = eventData.readBigUInt64LE(offset); offset += 8;
             
-            const [poolPda] = PublicKey.findProgramAddressSync(
-                [
-                    Buffer.from("pool"),
-                    poolIndexBuffer,
-                    poolAuthority.toBytes(),
-                    mintPubkey.toBytes(),
-                    this.WSOL_MINT.toBytes()
-                ],
-                this.PUMPSWAP_PROGRAM_ID
-            );
+            const quoteAmountIn = eventData.readBigUInt64LE(offset); offset += 8;           // total SOL before fees
             
-            logger.debug(`   Derived Pool: ${poolPda.toString()}`);
-            this.stats.poolsDerivied++;
+            // Skip fee fields
+            const lpFeeBasisPoints = eventData.readBigUInt64LE(offset); offset += 8;
+            const lpFee = eventData.readBigUInt64LE(offset); offset += 8;
+            const protocolFeeBasisPoints = eventData.readBigUInt64LE(offset); offset += 8;
+            const protocolFee = eventData.readBigUInt64LE(offset); offset += 8;
             
-            const poolAccountInfo = await this.connection.getAccountInfo(poolPda);
-            if (poolAccountInfo) {
-                this.stats.poolsFound++;
-                return poolPda;
-            } else {
-                logger.debug(`❌ Pool derived but doesn't exist on-chain yet`);
-                return null;
-            }
+            const quoteAmountInWithLpFee = eventData.readBigUInt64LE(offset); offset += 8;
+            const userQuoteAmountIn = eventData.readBigUInt64LE(offset); offset += 8;       // ACTUAL SOL SPENT
+
+            logger.info(`🔍 BUY EVENT PARSED:`);
+            logger.info(`   Base Amount Out: ${baseAmountOut.toString()} (${Number(baseAmountOut) / 1e6} tokens)`);
+            logger.info(`   User Quote Amount In: ${userQuoteAmountIn.toString()} (${Number(userQuoteAmountIn) / 1e9} SOL)`);
+            logger.info(`   LP Fee: ${lpFee.toString()} (${Number(lpFee) / 1e9} SOL)`);
+            logger.info(`   Protocol Fee: ${protocolFee.toString()} (${Number(protocolFee) / 1e9} SOL)`);
+
+            return {
+                exactTokensReceived: Number(baseAmountOut) / 1e6,      // Convert from base units to tokens
+                exactSolSpent: Number(userQuoteAmountIn) / 1e9,        // Convert lamports to SOL
+                totalSolWithFees: Number(quoteAmountIn) / 1e9,         // Total including LP fees
+                maxSolRequested: Number(maxQuoteAmountIn) / 1e9,
+                lpFee: Number(lpFee) / 1e9,
+                protocolFee: Number(protocolFee) / 1e9,
+                timestamp: Number(timestamp),
+                success: true,
+                method: 'event_log'
+            };
             
         } catch (error) {
-            logger.debug(`❌ Method 1 failed: ${error.message}`);
+            logger.error('Error parsing BuyEvent data:', error.message);
+            logger.error('Event data length:', eventData.length);
+            return null;
+        }
+    }
+
+    // 🔥 FIXED: Parse SellEvent data with correct field order
+    parseSellEventData(eventData) {
+        try {
+            let offset = 8; // Skip discriminator
+            
+            // Parse fields according to EXACT SellEvent structure from IDL
+            const timestamp = eventData.readBigInt64LE(offset); offset += 8;
+            const baseAmountIn = eventData.readBigUInt64LE(offset); offset += 8;           // tokens sold
+            const minQuoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;      // minimum SOL expected
+            
+            // Skip user reserves
+            const userBaseTokenReserves = eventData.readBigUInt64LE(offset); offset += 8;
+            const userQuoteTokenReserves = eventData.readBigUInt64LE(offset); offset += 8;
+            
+            // Skip pool reserves  
+            const poolBaseTokenReserves = eventData.readBigUInt64LE(offset); offset += 8;
+            const poolQuoteTokenReserves = eventData.readBigUInt64LE(offset); offset += 8;
+            
+            const quoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;         // total SOL before fees
+            
+            // Skip fee fields
+            const lpFeeBasisPoints = eventData.readBigUInt64LE(offset); offset += 8;
+            const lpFee = eventData.readBigUInt64LE(offset); offset += 8;
+            const protocolFeeBasisPoints = eventData.readBigUInt64LE(offset); offset += 8;
+            const protocolFee = eventData.readBigUInt64LE(offset); offset += 8;
+            
+            const quoteAmountOutWithoutLpFee = eventData.readBigUInt64LE(offset); offset += 8;
+            const userQuoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;     // ACTUAL SOL RECEIVED
+
+            logger.info(`🔍 SELL EVENT PARSED:`);
+            logger.info(`   Base Amount In: ${baseAmountIn.toString()} (${Number(baseAmountIn) / 1e6} tokens)`);
+            logger.info(`   User Quote Amount Out: ${userQuoteAmountOut.toString()} (${Number(userQuoteAmountOut) / 1e9} SOL)`);
+            logger.info(`   LP Fee: ${lpFee.toString()} (${Number(lpFee) / 1e9} SOL)`);
+            logger.info(`   Protocol Fee: ${protocolFee.toString()} (${Number(protocolFee) / 1e9} SOL)`);
+
+            return {
+                exactTokensSold: Number(baseAmountIn) / 1e6,           // Convert from base units to tokens
+                exactSolReceived: Number(userQuoteAmountOut) / 1e9,    // Convert lamports to SOL
+                totalSolBeforeFees: Number(quoteAmountOut) / 1e9,      // Total before fees
+                minSolExpected: Number(minQuoteAmountOut) / 1e9,
+                lpFee: Number(lpFee) / 1e9,
+                protocolFee: Number(protocolFee) / 1e9,
+                timestamp: Number(timestamp),
+                success: true,
+                method: 'event_log'
+            };
+            
+        } catch (error) {
+            logger.error('Error parsing SellEvent data:', error.message);
+            logger.error('Event data length:', eventData.length);
+            return null;
+        }
+    }
+
+    // 🔥 ENHANCED: Better event parsing with comprehensive debug logs
+    async parseBuyEventFromTransaction(signature) {
+        try {
+            logger.info(`🔍 Parsing BuyEvent from transaction: ${signature}`);
+            
+            const tx = await this.connection.getTransaction(signature, {
+                commitment: 'confirmed',
+                maxSupportedTransactionVersion: 0
+            });
+            
+            if (!tx || !tx.meta) {
+                throw new Error('Transaction not found or incomplete');
+            }
+
+            logger.info(`📊 Transaction found. Meta status: ${tx.meta.err ? 'ERROR' : 'SUCCESS'}`);
+            
+            const buyEventDiscriminator = [103, 244, 82, 31, 44, 245, 119, 119]; // From IDL
+            
+            const allLogs = tx.meta.logMessages || [];
+            logger.info(`📝 Total log messages: ${allLogs.length}`);
+            
+            // Look for program data logs with multiple patterns
+            const programDataLogs = allLogs.filter(log => 
+                log.includes('Program data:') && 
+                log.includes('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA')
+            );
+            
+            const programLogs = allLogs.filter(log => 
+                log.includes('Program log:') && log.includes('data:')
+            );
+            
+            const eventLogs = [...programDataLogs, ...programLogs];
+            logger.info(`🎯 Found ${eventLogs.length} potential event logs`);
+
+            for (let i = 0; i < eventLogs.length; i++) {
+                const log = eventLogs[i];
+                logger.info(`🔍 Examining log ${i + 1}: ${log.substring(0, 100)}...`);
+                
+                try {
+                    // Try multiple data extraction patterns
+                    let dataMatch = log.match(/Program data: (.+)/);
+                    if (!dataMatch) {
+                        dataMatch = log.match(/Program log: data: (.+)/);
+                    }
+                    if (!dataMatch) {
+                        dataMatch = log.match(/data: (.+)/);
+                    }
+                    
+                    if (!dataMatch) {
+                        logger.info(`   No data found in log ${i + 1}`);
+                        continue;
+                    }
+
+                    const eventData = Buffer.from(dataMatch[1], 'base64');
+                    logger.info(`   Decoded event data length: ${eventData.length} bytes`);
+                    
+                    if (eventData.length < 8) {
+                        logger.info(`   Event data too short (< 8 bytes), skipping`);
+                        continue;
+                    }
+                    
+                    const discriminator = eventData.slice(0, 8);
+                    const expectedDiscriminator = Buffer.from(buyEventDiscriminator);
+                    
+                    logger.info(`   Discriminator: [${Array.from(discriminator).join(', ')}]`);
+                    logger.info(`   Expected:      [${Array.from(expectedDiscriminator).join(', ')}]`);
+                    
+                    if (Buffer.compare(discriminator, expectedDiscriminator) === 0) {
+                        logger.info(`✅ Found BuyEvent! Parsing data...`);
+                        return this.parseBuyEventData(eventData);
+                    } else {
+                        logger.info(`   Discriminator mismatch, skipping`);
+                    }
+                    
+                } catch (parseError) {
+                    logger.error(`Error parsing log ${i + 1}:`, parseError.message);
+                    continue;
+                }
+            }
+
+            logger.warn(`❌ No BuyEvent found in logs`);
+            return null;
+            
+        } catch (error) {
+            logger.error('Error parsing buy event:', error.message);
+            return null;
+        }
+    }
+
+    // 🔥 ENHANCED: Better sell event parsing with debug logs
+    async parseSellEventFromTransaction(signature) {
+        try {
+            logger.info(`🔍 Parsing SellEvent from transaction: ${signature}`);
+            
+            const tx = await this.connection.getTransaction(signature, {
+                commitment: 'confirmed',
+                maxSupportedTransactionVersion: 0
+            });
+            
+            if (!tx || !tx.meta) {
+                throw new Error('Transaction not found or incomplete');
+            }
+
+            logger.info(`📊 Transaction found. Meta status: ${tx.meta.err ? 'ERROR' : 'SUCCESS'}`);
+
+            const sellEventDiscriminator = [62, 47, 55, 10, 165, 3, 220, 42]; // From IDL
+            
+            const allLogs = tx.meta.logMessages || [];
+            logger.info(`📝 Total log messages: ${allLogs.length}`);
+            
+            const programDataLogs = allLogs.filter(log => 
+                log.includes('Program data:') && 
+                log.includes('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA')
+            );
+            
+            const programLogs = allLogs.filter(log => 
+                log.includes('Program log:') && log.includes('data:')
+            );
+            
+            const eventLogs = [...programDataLogs, ...programLogs];
+            logger.info(`🎯 Found ${eventLogs.length} potential event logs`);
+
+            for (let i = 0; i < eventLogs.length; i++) {
+                const log = eventLogs[i];
+                logger.info(`🔍 Examining log ${i + 1}: ${log.substring(0, 100)}...`);
+                
+                try {
+                    let dataMatch = log.match(/Program data: (.+)/);
+                    if (!dataMatch) {
+                        dataMatch = log.match(/Program log: data: (.+)/);
+                    }
+                    if (!dataMatch) {
+                        dataMatch = log.match(/data: (.+)/);
+                    }
+                    
+                    if (!dataMatch) {
+                        logger.info(`   No data found in log ${i + 1}`);
+                        continue;
+                    }
+
+                    const eventData = Buffer.from(dataMatch[1], 'base64');
+                    logger.info(`   Decoded event data length: ${eventData.length} bytes`);
+                    
+                    if (eventData.length < 8) {
+                        logger.info(`   Event data too short (< 8 bytes), skipping`);
+                        continue;
+                    }
+                    
+                    const discriminator = eventData.slice(0, 8);
+                    const expectedDiscriminator = Buffer.from(sellEventDiscriminator);
+                    
+                    logger.info(`   Discriminator: [${Array.from(discriminator).join(', ')}]`);
+                    logger.info(`   Expected:      [${Array.from(expectedDiscriminator).join(', ')}]`);
+                    
+                    if (Buffer.compare(discriminator, expectedDiscriminator) === 0) {
+                        logger.info(`✅ Found SellEvent! Parsing data...`);
+                        return this.parseSellEventData(eventData);
+                    } else {
+                        logger.info(`   Discriminator mismatch, skipping`);
+                    }
+                    
+                } catch (parseError) {
+                    logger.error(`Error parsing log ${i + 1}:`, parseError.message);
+                    continue;
+                }
+            }
+
+            logger.warn(`❌ No SellEvent found in logs`);
+            return null;
+            
+        } catch (error) {
+            logger.error('Error parsing sell event:', error.message);
+            return null;
+        }
+    }
+
+    async getGlobalConfig() {
+        try {
+            const [globalConfig] = PublicKey.findProgramAddressSync(
+                [Buffer.from('global_config')],  // FIXED: Use underscore not hyphen
+                this.PUMPSWAP_PROGRAM_ID
+            );
+            logger.debug(`🔧 Global Config: ${globalConfig.toString()}`);
+            return globalConfig;
+        } catch (error) {
+            logger.error('Error getting global config:', error.message);
             return null;
         }
     }
@@ -481,10 +517,8 @@ class PumpSwapService {
 
     async getProtocolFeeRecipients() {
         try {
-            const [globalConfig] = PublicKey.findProgramAddressSync(
-                [Buffer.from("global_config")],
-                this.PUMPSWAP_PROGRAM_ID
-            );
+            const globalConfig = await this.getGlobalConfig();
+            if (!globalConfig) return [];
 
             const globalConfigInfo = await this.connection.getAccountInfo(globalConfig);
             if (!globalConfigInfo) return [];
@@ -543,7 +577,6 @@ class PumpSwapService {
             }
 
             const slippageToUse = customSlippage !== null ? customSlippage : this.config.buySlippage;
-
             logger.info(`🚀 EXECUTING REAL BUY: ${solAmount} SOL → ${tokenMint}`);
             logger.info(`🎯 Using buy slippage: ${slippageToUse}%`);
 
@@ -551,50 +584,43 @@ class PumpSwapService {
             if (!poolAddress) {
                 throw new Error(`Pool not found after ${this.config.maxRetries} attempts`);
             }
-
             logger.info(`🏊 Using pool: ${poolAddress.toString()}`);
 
             const mintPubkey = new PublicKey(tokenMint);
             const quoteMint = this.WSOL_MINT;
 
+            // Get coin creator from the pool account
             const coinCreator = await this.getPoolCoinCreator(poolAddress);
             if (!coinCreator) {
                 throw new Error('Coin creator not found');
             }
+            logger.debug(`🎨 Coin Creator: ${coinCreator.toString()}`);
 
             const protocolFeeRecipients = await this.getProtocolFeeRecipients();
             if (protocolFeeRecipients.length === 0) {
                 throw new Error('No protocol fee recipients found');
             }
-
             const protocolFeeRecipient = protocolFeeRecipients[0];
+            logger.debug(`💰 Protocol Fee Recipient: ${protocolFeeRecipient.toString()}`);
 
-            // Derive required PDAs
-            const [globalConfig] = PublicKey.findProgramAddressSync(
-                [Buffer.from("global_config")],
-                this.PUMPSWAP_PROGRAM_ID
-            );
-
+            // Derive required PDAs using the WORKING derivation logic
+            const globalConfig = await this.getGlobalConfig();
+            
             const [eventAuthority] = PublicKey.findProgramAddressSync(
                 [Buffer.from("__event_authority")],
                 this.PUMPSWAP_PROGRAM_ID
             );
+            logger.debug(`📡 Event Authority: ${eventAuthority.toString()}`);
 
+            // 🔥 FIXED: Use the working coin creator vault authority derivation
             const [coinCreatorVaultAuthority] = PublicKey.findProgramAddressSync(
                 [Buffer.from("creator_vault"), coinCreator.toBytes()],
                 this.PUMPSWAP_PROGRAM_ID
             );
+            logger.debug(`🏦 Coin Creator Vault Authority: ${coinCreatorVaultAuthority.toString()}`);
 
-            // Token accounts
-            const userBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
-            const userQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, this.wallet.publicKey);
-            const poolBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, poolAddress, true);
-            const poolQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, poolAddress, true);
-            const protocolFeeRecipientTokenAccount = getAssociatedTokenAddressSync(quoteMint, protocolFeeRecipient, true);
-            const coinCreatorVaultAta = getAssociatedTokenAddressSync(quoteMint, coinCreatorVaultAuthority, true);
-
-            // Calculate amounts - Following IDL: buy(base_amount_out, max_quote_amount_in)
-            const maxQuoteAmountIn = new BN(solAmount * 1e9); // Convert SOL to lamports
+            // Calculate amounts
+            const maxQuoteAmountIn = new BN(Math.floor(solAmount * 1e9)); // Convert SOL to lamports
             
             // Calculate expected tokens we'll receive (base_amount_out)
             const currentPrice = await this.calculatePrice(poolAddress, tokenMint);
@@ -609,12 +635,28 @@ class PumpSwapService {
             logger.info(`💰 Buying: max ${solAmount} SOL for ~${(expectedTokensOut / 1e6).toFixed(2)}M tokens`);
             logger.info(`💰 Current price: ${currentPrice.toFixed(12)} SOL per token`);
 
+            // Derive token accounts
+            const userBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
+            const userQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, this.wallet.publicKey);
+            const poolBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, poolAddress, true);
+            const poolQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, poolAddress, true);
+            const protocolFeeRecipientTokenAccount = getAssociatedTokenAddressSync(quoteMint, protocolFeeRecipient, true);
+            const coinCreatorVaultAta = getAssociatedTokenAddressSync(quoteMint, coinCreatorVaultAuthority, true);
+
+            logger.debug(`👤 User Base Token Account: ${userBaseTokenAccount.toString()}`);
+            logger.debug(`👤 User Quote Token Account: ${userQuoteTokenAccount.toString()}`);
+            logger.debug(`🏊 Pool Base Token Account: ${poolBaseTokenAccount.toString()}`);
+            logger.debug(`🏊 Pool Quote Token Account: ${poolQuoteTokenAccount.toString()}`);
+            logger.debug(`💰 Protocol Fee Recipient Token Account: ${protocolFeeRecipientTokenAccount.toString()}`);
+            logger.debug(`🏦 Coin Creator Vault ATA: ${coinCreatorVaultAta.toString()}`);
+
+            // Build transaction
             const instructions = [];
 
-            // Compute budget
+            // Add compute budget
             instructions.push(
-                ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 }),
-                ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 })
+                ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
+                ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 })
             );
 
             // Create token accounts if needed
@@ -624,7 +666,10 @@ class PumpSwapService {
                     userBaseTokenAccount,
                     this.wallet.publicKey,
                     mintPubkey
-                ),
+                )
+            );
+
+            instructions.push(
                 createAssociatedTokenAccountIdempotentInstruction(
                     this.wallet.publicKey,
                     userQuoteTokenAccount,
@@ -649,7 +694,7 @@ class PumpSwapService {
                 data: Buffer.from([17]) // SyncNative instruction
             });
 
-            // PumpSwap buy instruction - Following IDL: buy(base_amount_out, max_quote_amount_in)
+            // PumpSwap buy instruction
             const buyIx = await this.program.methods
                 .buy(baseAmountOut, maxQuoteAmountIn)
                 .accounts({
@@ -676,6 +721,15 @@ class PumpSwapService {
                 .instruction();
 
             instructions.push(buyIx);
+
+            // Close WSOL account to get rent back
+            instructions.push(
+                createCloseAccountInstruction(
+                    userQuoteTokenAccount,
+                    this.wallet.publicKey,
+                    this.wallet.publicKey
+                )
+            );
 
             // Build and send transaction
             const { blockhash } = await this.connection.getLatestBlockhash();
@@ -721,12 +775,8 @@ class PumpSwapService {
                 return {
                     success: true,
                     signature: signature,
-                    // 🔥 EXACT AMOUNTS from blockchain events
                     solSpent: exactAmounts.exactSolSpent,
                     tokensReceived: exactAmounts.exactTokensReceived,
-                    // Original calculated amounts for comparison
-                    estimatedSolSpent: solAmount,
-                    estimatedTokensReceived: expectedTokensOut,
                     poolAddress: poolAddress.toString(),
                     calculatedPrice: exactAmounts.exactSolSpent / exactAmounts.exactTokensReceived,
                     type: 'BUY',
@@ -734,14 +784,14 @@ class PumpSwapService {
                     exactData: exactAmounts
                 };
             } else {
-                // Fallback to original estimates if parsing fails
+                // Use estimates if parsing fails
                 this.stats.estimatesUsed++;
                 logger.warn('⚠️ Could not parse exact amounts, using estimates');
                 return {
                     success: true,
                     signature: signature,
-                    solSpent: solAmount, // Estimate
-                    tokensReceived: expectedTokensOut, // Estimate
+                    solSpent: solAmount,
+                    tokensReceived: baseAmountOut.toNumber() / 1e6,
                     poolAddress: poolAddress.toString(),
                     calculatedPrice: currentPrice,
                     type: 'BUY',
@@ -765,67 +815,60 @@ class PumpSwapService {
             }
 
             const slippageToUse = customSlippage !== null ? customSlippage : this.config.sellSlippage;
-    
-            logger.info(`🚀 EXECUTING REAL SELL: ${tokenAmount} tokens → SOL`);
-    
-            const poolAddress = await this.findPool(tokenMint);
-            if (!poolAddress) {
-                throw new Error('Pool not found');
-            }
-    
-            logger.info(`🏊 Using pool: ${poolAddress.toString()}`);
-    
             const mintPubkey = new PublicKey(tokenMint);
             const quoteMint = this.WSOL_MINT;
-    
-            const coinCreator = await this.getPoolCoinCreator(poolAddress);
-            if (!coinCreator) {
-                throw new Error('Coin creator not found');
+
+            // Find pool
+            const poolAddress = await this.findPool(tokenMint);
+            if (!poolAddress) {
+                throw new Error('Pool not found for this token');
             }
-    
-            const protocolFeeRecipients = await this.getProtocolFeeRecipients();
-            if (protocolFeeRecipients.length === 0) {
-                throw new Error('No protocol fee recipients found');
-            }
-    
-            const protocolFeeRecipient = protocolFeeRecipients[0];
-    
-            const baseAmountIn = new BN(tokenAmount * 1e6);
+
+            // Calculate amounts
+            const baseAmountIn = new BN(Math.floor(tokenAmount * 1e6)); // Assuming 6 decimals
             const expectedSolOutput = await this.getExpectedSolOutput(poolAddress, baseAmountIn, mintPubkey);
-            const slippageFactor = new BN(100 - slippageToUse);
-            const minQuoteOut = expectedSolOutput.mul(slippageFactor).div(new BN(100));
-    
-            logger.info(`💰 Selling ${tokenAmount} tokens for ~${(parseFloat(expectedSolOutput.toString()) / 1e9).toFixed(6)} SOL`);
-    
-            const [globalConfig] = PublicKey.findProgramAddressSync(
-                [Buffer.from("global_config")],
-                this.PUMPSWAP_PROGRAM_ID
-            );
-    
-            const [eventAuthority] = PublicKey.findProgramAddressSync(
-                [Buffer.from("__event_authority")],
-                this.PUMPSWAP_PROGRAM_ID
-            );
-    
-            const [coinCreatorVaultAuthority] = PublicKey.findProgramAddressSync(
-                [Buffer.from("creator_vault"), coinCreator.toBytes()],
-                this.PUMPSWAP_PROGRAM_ID
-            );
-    
+            const minQuoteAmountOut = expectedSolOutput.mul(new BN(100 - slippageToUse)).div(new BN(100));
+
+            // Get necessary accounts
+            const globalConfig = await this.getGlobalConfig();
+            const protocolFeeRecipients = await this.getProtocolFeeRecipients();
+            const protocolFeeRecipient = protocolFeeRecipients[0] || this.wallet.publicKey;
+
+            // Derive accounts
             const userBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
             const userQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, this.wallet.publicKey);
             const poolBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, poolAddress, true);
             const poolQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, poolAddress, true);
             const protocolFeeRecipientTokenAccount = getAssociatedTokenAddressSync(quoteMint, protocolFeeRecipient, true);
-            const coinCreatorVaultAta = getAssociatedTokenAddressSync(quoteMint, coinCreatorVaultAuthority, true);
-    
-            const instructions = [];
-    
-            instructions.push(
-                ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 }),
-                ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 })
+
+            const [eventAuthority] = PublicKey.findProgramAddressSync(
+                [Buffer.from('__event_authority')],
+                this.PUMPSWAP_PROGRAM_ID
             );
-    
+
+            const [coinCreatorVaultAta] = PublicKey.findProgramAddressSync(
+                [
+                    Buffer.from('coin-creator-vault'),
+                    mintPubkey.toBuffer()
+                ],
+                this.PUMP_PROGRAM_ID
+            );
+
+            const [coinCreatorVaultAuthority] = PublicKey.findProgramAddressSync(
+                [Buffer.from('coin-creator-vault-authority')],
+                this.PUMP_PROGRAM_ID
+            );
+
+            // Build transaction
+            const instructions = [];
+
+            // Add compute budget
+            instructions.push(
+                ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
+                ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 })
+            );
+
+            // Create WSOL account if needed
             instructions.push(
                 createAssociatedTokenAccountIdempotentInstruction(
                     this.wallet.publicKey,
@@ -834,9 +877,10 @@ class PumpSwapService {
                     quoteMint
                 )
             );
-    
+
+            // PumpSwap sell instruction
             const sellIx = await this.program.methods
-                .sell(baseAmountIn, minQuoteOut)
+                .sell(baseAmountIn, minQuoteAmountOut)
                 .accounts({
                     pool: poolAddress,
                     user: this.wallet.publicKey,
@@ -859,28 +903,30 @@ class PumpSwapService {
                     coinCreatorVaultAuthority: coinCreatorVaultAuthority,
                 })
                 .instruction();
-    
+
             instructions.push(sellIx);
-    
-            const closeAccountIx = createCloseAccountInstruction(
-                userQuoteTokenAccount,
-                this.wallet.publicKey, 
-                this.wallet.publicKey  
+
+            // Close WSOL account to get SOL back
+            instructions.push(
+                createCloseAccountInstruction(
+                    userQuoteTokenAccount,
+                    this.wallet.publicKey,
+                    this.wallet.publicKey
+                )
             );
-            
-            instructions.push(closeAccountIx);
-    
+
+            // Build and send transaction
             const { blockhash } = await this.connection.getLatestBlockhash();
             const message = new TransactionMessage({
                 payerKey: this.wallet.publicKey,
                 recentBlockhash: blockhash,
                 instructions: instructions,
             }).compileToV0Message();
-    
+
             const transaction = new VersionedTransaction(message);
             transaction.sign([this.wallet]);
-    
-            logger.info('📤 Sending sell transaction with automatic wSOL unwrapping...');
+
+            logger.info('📤 Sending sell transaction...');
             const signature = await this.connection.sendTransaction(transaction, {
                 maxRetries: 3
             });
@@ -892,7 +938,7 @@ class PumpSwapService {
                 blockhash: latestBlockhash.blockhash,
                 lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
             }, 'confirmed');
-    
+
             this.stats.sellsExecuted++;
 
             logger.info(`✅ SELL SUCCESS!`);
@@ -900,12 +946,12 @@ class PumpSwapService {
             logger.info(`   Pool Used: ${poolAddress.toString()}`);
             logger.info(`   Explorer: https://solscan.io/tx/${signature}`);
 
-            // 🔥 NEW: Parse exact amounts from sell transaction
+            // 🔥 NEW: Parse exact amounts from transaction
             const exactAmounts = await this.parseSellEventFromTransaction(signature);
             
             if (exactAmounts && exactAmounts.success) {
                 this.stats.exactAmountsParsed++;
-                logger.info(`✅ EXACT SELL AMOUNTS PARSED:`);
+                logger.info(`✅ EXACT AMOUNTS PARSED:`);
                 logger.info(`   Tokens Sold: ${exactAmounts.exactTokensSold.toLocaleString()} tokens`);
                 logger.info(`   SOL Received: ${exactAmounts.exactSolReceived.toFixed(6)} SOL`);
                 
@@ -916,12 +962,11 @@ class PumpSwapService {
                     tokensSpent: exactAmounts.exactTokensSold,
                     poolAddress: poolAddress.toString(),
                     type: 'SELL',
-                    unwrapped: true,
                     slippageUsed: slippageToUse,
                     exactData: exactAmounts
                 };
             } else {
-                // Fallback to estimates
+                // Use estimates if parsing fails
                 this.stats.estimatesUsed++;
                 const solReceived = parseFloat(expectedSolOutput.toString()) / 1e9;
                 logger.warn('⚠️ Could not parse exact sell amounts, using estimates');
@@ -933,7 +978,6 @@ class PumpSwapService {
                     tokensSpent: tokenAmount,
                     poolAddress: poolAddress.toString(),
                     type: 'SELL',
-                    unwrapped: true,
                     slippageUsed: slippageToUse,
                     exactData: null
                 };
@@ -946,62 +990,8 @@ class PumpSwapService {
         }
     }
 
-    async updatePositionAfterSell(positionId, actualTokensSold, actualSolReceived, actualPnL, signature, reason) {
-        try {
-            const position = this.positions.get(positionId);
-            if (!position) {
-                logger.error(`Position ${positionId} not found for update after sell`);
-                return;
-            }
-    
-            logger.info(`📊 UPDATING POSITION AFTER SELL: ${position.symbol}`);
-            logger.info(`   Actual tokens sold: ${actualTokensSold.toLocaleString()}`);
-            logger.info(`   Actual SOL received: ${actualSolReceived.toFixed(6)} SOL`);
-            logger.info(`   Actual PnL: ${actualPnL >= 0 ? '+' : ''}${actualPnL.toFixed(6)} SOL`);
-    
-            // Update position data with exact amounts
-            const sellData = {
-                tokenAmount: actualTokensSold,
-                solReceived: actualSolReceived,
-                pnl: actualPnL,
-                signature: signature,
-                reason: reason
-            };
-    
-            // Call completeSell with exact data
-            await this.completeSell(positionId, sellData);
-    
-            logger.info(`✅ Position ${position.symbol} updated with exact sell data`);
-    
-        } catch (error) {
-            logger.error(`❌ Failed to update position after sell: ${error.message}`);
-            throw error;
-        }
-    }
-
-    getSlippageSettings() {
-        return {
-            buySlippage: this.config.buySlippage,
-            sellSlippage: this.config.sellSlippage
-        };
-    }
-
-    // Method to update slippage settings at runtime
-    updateSlippageSettings(buySlippage = null, sellSlippage = null) {
-        if (buySlippage !== null) {
-            this.config.buySlippage = buySlippage;
-            logger.info(`🎯 Updated buy slippage to: ${buySlippage}%`);
-        }
-        if (sellSlippage !== null) {
-            this.config.sellSlippage = sellSlippage;
-            logger.info(`🎯 Updated sell slippage to: ${sellSlippage}%`);
-        }
-    }
-
     async getTokenBalance(tokenMint) {
         try {
-            if (!this.wallet) return 0;
-            
             const mintPubkey = new PublicKey(tokenMint);
             const tokenAccount = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
             
@@ -1014,7 +1004,6 @@ class PumpSwapService {
 
     async getMarketData(tokenMint) {
         try {
-            
             const poolAddress = await this.findPool(tokenMint);
             if (!poolAddress) {
                 return null;
