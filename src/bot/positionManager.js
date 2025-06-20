@@ -336,7 +336,6 @@ class PositionManager extends EventEmitter {
         logger.debug(`${position.symbol}: ${newPrice.toFixed(8)} SOL (${priceChange > 0 ? '+' : ''}${priceChange.toFixed(2)}%) via ${source}`);
     }
 
-    // 🔥 ENHANCED: Execute sell with transaction confirmation tracking
     async executePumpSwapSell(position, sellPercentage, reason = 'Manual Sell') {
         try {
             // Prevent double-selling
@@ -344,7 +343,7 @@ class PositionManager extends EventEmitter {
                 logger.warn(`⚠️ Position ${position.symbol} already has pending sell`);
                 return { success: false, error: 'Sell already pending' };
             }
-
+    
             // Update position to pending
             position.status = 'PENDING_SELL';
             position.pendingReason = reason;
@@ -354,115 +353,42 @@ class PositionManager extends EventEmitter {
             
             this.positions.set(position.id, position);
             await this.savePositions();
-
+    
             logger.info(`⏳ Position ${position.symbol} set to PENDING_SELL`);
-
+    
             if (this.config.tradingMode === 'live') {
-                return await this.executeLiveSellWithConfirmation(position, sellPercentage, reason);
+                return await this.executeLiveSell(position, sellPercentage, reason);
             } else {
                 return await this.executePaperSell(position, sellPercentage, reason);
             }
-
+    
         } catch (error) {
-            // Reset position status on error
-            position.status = 'ACTIVE';
-            position.errorMessage = error.message;
-            this.positions.set(position.id, position);
-            await this.savePositions();
-            throw error;
-        }
-    }
-
-    async executeLiveSellWithConfirmation(position, sellPercentage, reason) {
-        try {
-            const tokenAmount = parseFloat(position.remainingQuantity) * (sellPercentage / 100);
+            // 🔥 NEW: Add verification logic here after 3 failures
+            position.retryCount = (position.retryCount || 0) + 1;
             
-            logger.info(`🚀 Executing LIVE sell: ${tokenAmount.toFixed(6)} ${position.symbol} (${reason})`);
-            
-            // Execute the sell transaction
-            const result = await this.tradingBot.pumpSwapService.executeSell(
-                position.tokenAddress,
-                tokenAmount,
-                this.tradingBot.config.slippageTolerance
-            );
-            
-            if (result.success) {
-                // Store transaction info for confirmation
-                position.pendingTxHash = result.signature;
-                position.pendingTokenAmount = tokenAmount;
-                position.pendingSellPercentage = sellPercentage;
+            if (position.retryCount >= 3 && error.message.includes('insufficient funds')) {
+                logger.warn(`🔍 INSUFFICIENT FUNDS after ${position.retryCount} attempts - verifying tokens...`);
                 
-                this.positions.set(position.id, position);
-                await this.savePositions();
-                
-                // Schedule confirmation check
-                this.scheduleConfirmationCheck(position.id, result.signature);
-                
-                logger.info(`📤 Sell submitted: ${result.signature} - checking confirmation in ${this.config.confirmationDelay}ms`);
-                
-                return {
-                    success: true,
-                    signature: result.signature,
-                    pending: true,
-                    message: 'Transaction submitted, awaiting confirmation'
-                };
-            } else {
-                throw new Error('Transaction submission failed');
+                const recovered = await this.verifyTokensAndRecoverPosition(position, error.message);
+                if (recovered) {
+                    return { success: true, recovered: true };
+                }
             }
             
-        } catch (error) {
-            logger.error(`❌ Live sell execution failed: ${error.message}`);
-            
-            // Increment retry count
-            position.retryCount = (position.retryCount || 0) + 1;
-            this.sessionStats.retryAttempts++;
-            
+            // Handle retries or move to manual review
             if (position.retryCount >= this.config.maxRetries) {
-                // Move to manual review after max retries
                 await this.moveToManualReview(position, `Max retries exceeded: ${error.message}`);
             } else {
-                // Reset to active for retry
                 position.status = 'ACTIVE';
                 position.lastRetryError = error.message;
                 this.positions.set(position.id, position);
                 await this.savePositions();
-                
-                logger.warn(`⚠️ Sell failed (retry ${position.retryCount}/${this.config.maxRetries}), will retry`);
             }
             
             throw error;
         }
     }
-
-    async executePaperSell(position, sellPercentage, reason) {
-        // Paper trading - simulate immediate success
-        const tokenAmount = parseFloat(position.remainingQuantity) * (sellPercentage / 100);
-        const currentPrice = position.currentPrice || position.entryPrice;
-        const solReceived = tokenAmount * currentPrice;
-        const originalInvestment = (tokenAmount / parseFloat(position.quantity)) * position.investedAmount;
-        const pnl = solReceived - originalInvestment;
-        
-        logger.info(`📝 Paper sell: ${tokenAmount.toFixed(6)} ${position.symbol} for ${solReceived.toFixed(6)} SOL`);
-        
-        // For paper trading, immediately complete
-        await this.completeSell(position.id, {
-            tokenAmount,
-            solReceived,
-            pnl,
-            signature: 'PAPER_SELL_' + Date.now(),
-            reason
-        });
-        
-        this.sessionStats.paperSellsExecuted++;
-        
-        return {
-            success: true,
-            signature: 'PAPER_SELL_' + Date.now(),
-            solReceived,
-            pnl,
-            pending: false
-        };
-    }
+    
 
     // Schedule confirmation check after delay
     scheduleConfirmationCheck(positionId, txHash) {
@@ -852,24 +778,342 @@ class PositionManager extends EventEmitter {
         }
     }
 
-    // Move position to manual review in trade history
     async moveToManualReview(position, reason) {
+        logger.info(`🔧 DEBUG: Moving position ${position.symbol} (ID: ${position.id}) to manual review`);
+        logger.info(`🔧 DEBUG: Position map size before: ${this.positions.size}`);
+        
         position.status = 'MANUAL_REVIEW_NEEDED';
         position.reviewReason = reason;
         position.reviewCreatedAt = Date.now();
         
-        // Move to trade history for manual review
         await this.movePositionToHistory(position);
-        this.positions.delete(position.id);
+        
+        // 🔥 DEBUG: Check if position exists before deleting
+        if (this.positions.has(position.id)) {
+            this.positions.delete(position.id);
+            logger.info(`🔧 DEBUG: Position ${position.symbol} deleted from map`);
+        } else {
+            logger.error(`🔧 DEBUG: Position ${position.symbol} NOT FOUND in map! Keys: ${Array.from(this.positions.keys())}`);
+        }
+        
+        logger.info(`🔧 DEBUG: Position map size after: ${this.positions.size}`);
         
         await this.savePositions();
         
         this.sessionStats.manualReviewCount++;
-        
         logger.error(`⚠️ MANUAL REVIEW NEEDED: ${position.symbol} - ${reason}`);
-        
         this.emit('manualReviewNeeded', position);
     }
+
+    async verifyTokensAndRecoverPosition(position, failureReason) {
+        try {
+            logger.info(`🔍 VERIFYING: Checking if ${position.symbol} tokens actually exist in wallet`);
+            
+            // Step 1: Check actual token balance on-chain
+            const currentBalance = await this.getActualTokenBalance(position.tokenAddress);
+            
+            if (currentBalance > 0) {
+                logger.warn(`⚠️ Tokens still exist! Balance: ${currentBalance.toFixed(6)} - This shouldn't happen`);
+                // Update position with correct balance and try again later
+                position.remainingQuantity = currentBalance.toString();
+                position.status = 'ACTIVE';
+                position.lastError = failureReason;
+                this.positions.set(position.id, position);
+                await this.savePositions();
+                return false; // Don't move to manual review yet
+            }
+            
+            logger.info(`✅ CONFIRMED: No tokens in wallet - looking for sell transaction`);
+            
+            // Step 2: Find the actual sell transaction
+            const sellTxData = await this.findLastSellTransaction(position.tokenAddress);
+            
+            if (!sellTxData) {
+                logger.error(`❌ Could not find sell transaction for ${position.symbol}`);
+                // Move to manual review as last resort
+                await this.moveToManualReview(position, `Tokens not found and no sell transaction located: ${failureReason}`);
+                return true;
+            }
+            
+            logger.info(`🎯 FOUND SELL TRANSACTION: ${sellTxData.signature}`);
+            logger.info(`   Tokens Sold: ${sellTxData.tokensSold.toLocaleString()}`);
+            logger.info(`   SOL Received: ${sellTxData.solReceived.toFixed(6)} SOL`);
+            logger.info(`   Transaction Time: ${new Date(sellTxData.timestamp).toLocaleString()}`);
+            
+            // Step 3: Close position with recovered data
+            await this.closePositionWithRecoveredData(position, sellTxData);
+            
+            return true;
+            
+        } catch (error) {
+            logger.error(`❌ Token verification failed for ${position.symbol}: ${error.message}`);
+            // Fall back to manual review
+            await this.moveToManualReview(position, `Verification failed: ${error.message}`);
+            return true;
+        }
+    }
+    
+    async getActualTokenBalance(tokenAddress) {
+        try {
+            if (!this.tradingBot?.pumpSwapService?.connection) {
+                throw new Error('No connection available');
+            }
+            
+            const connection = this.tradingBot.pumpSwapService.connection;
+            const mintPubkey = new PublicKey(tokenAddress);
+            const tokenAccount = getAssociatedTokenAddressSync(mintPubkey, this.tradingBot.pumpSwapService.wallet.publicKey);
+            
+            const balance = await connection.getTokenAccountBalance(tokenAccount);
+            return parseFloat(balance.value.amount) / Math.pow(10, balance.value.decimals);
+            
+        } catch (error) {
+            // If account doesn't exist, balance is 0
+            if (error.message.includes('could not find account')) {
+                return 0;
+            }
+            logger.debug(`Token balance check error: ${error.message}`);
+            return 0;
+        }
+    }
+    
+    async findLastSellTransaction(tokenAddress) {
+        try {
+            if (!this.tradingBot?.pumpSwapService?.connection) {
+                throw new Error('No connection available');
+            }
+            
+            const connection = this.tradingBot.pumpSwapService.connection;
+            const walletPubkey = this.tradingBot.pumpSwapService.wallet.publicKey;
+            
+            logger.info(`🔍 Searching transaction history for ${tokenAddress} sells...`);
+            
+            // Get recent transaction signatures for the wallet
+            const signatures = await connection.getSignaturesForAddress(walletPubkey, {
+                limit: 50 // Check last 50 transactions
+            });
+            
+            logger.info(`📊 Checking ${signatures.length} recent transactions...`);
+            
+            // Check each transaction for our token sell
+            for (const sigInfo of signatures) {
+                try {
+                    const tx = await connection.getTransaction(sigInfo.signature, {
+                        commitment: 'confirmed',
+                        maxSupportedTransactionVersion: 0
+                    });
+                    
+                    if (!tx || !tx.meta) continue;
+                    
+                    // Look for sell transaction patterns
+                    const sellData = this.extractSellDataFromTransaction(tx, tokenAddress);
+                    if (sellData) {
+                        logger.info(`✅ Found sell transaction: ${sigInfo.signature}`);
+                        return {
+                            signature: sigInfo.signature,
+                            timestamp: sigInfo.blockTime * 1000,
+                            ...sellData
+                        };
+                    }
+                    
+                } catch (error) {
+                    logger.debug(`Error checking transaction ${sigInfo.signature}: ${error.message}`);
+                    continue;
+                }
+            }
+            
+            logger.warn(`❌ No sell transaction found in last ${signatures.length} transactions`);
+            return null;
+            
+        } catch (error) {
+            logger.error(`Error searching transaction history: ${error.message}`);
+            return null;
+        }
+    }
+    
+    extractSellDataFromTransaction(tx, tokenAddress) {
+        try {
+            // Method 1: Check token balance changes
+            const preTokenBalances = tx.meta.preTokenBalances || [];
+            const postTokenBalances = tx.meta.postTokenBalances || [];
+            
+            // Find our token in pre/post balances
+            const preBalance = preTokenBalances.find(balance => 
+                balance.mint === tokenAddress && 
+                balance.owner === this.tradingBot.pumpSwapService.wallet.publicKey.toString()
+            );
+            
+            const postBalance = postTokenBalances.find(balance => 
+                balance.mint === tokenAddress && 
+                balance.owner === this.tradingBot.pumpSwapService.wallet.publicKey.toString()
+            );
+            
+            if (preBalance && (!postBalance || postBalance.uiTokenAmount.uiAmount === 0)) {
+                // Tokens decreased to zero - this is likely our sell
+                const tokensSold = preBalance.uiTokenAmount.uiAmount;
+                
+                // Method 2: Look for SOL increase
+                const preSOL = tx.meta.preBalances[0]; // Wallet is usually first account
+                const postSOL = tx.meta.postBalances[0];
+                const solReceived = (postSOL - preSOL) / 1e9; // Convert lamports to SOL
+                
+                if (tokensSold > 0 && solReceived > 0) {
+                    logger.info(`📊 Extracted from balance changes: ${tokensSold} tokens → ${solReceived.toFixed(6)} SOL`);
+                    return {
+                        tokensSold: tokensSold,
+                        solReceived: solReceived,
+                        method: 'balance_analysis'
+                    };
+                }
+            }
+            
+            // Method 3: Parse event data from logs (if available)
+            const eventData = this.parseEventDataFromLogs(tx.meta.logMessages || [], 'sell');
+            if (eventData) {
+                logger.info(`📊 Extracted from event data: ${eventData.tokensSold} tokens → ${eventData.solReceived.toFixed(6)} SOL`);
+                return eventData;
+            }
+            
+            return null;
+            
+        } catch (error) {
+            logger.debug(`Error extracting sell data: ${error.message}`);
+            return null;
+        }
+    }
+    
+    parseEventDataFromLogs(logMessages, eventType) {
+        try {
+            // Use the same event parsing logic from your PumpSwapService
+            const sellEventDiscriminator = [62, 47, 55, 10, 165, 3, 220, 42];
+            
+            const programDataLogs = logMessages.filter(log => 
+                log.startsWith('Program data:')
+            );
+            
+            for (const log of programDataLogs) {
+                try {
+                    const dataString = log.substring('Program data: '.length).trim();
+                    if (!dataString || dataString.length < 20) continue;
+                    
+                    const eventData = Buffer.from(dataString, 'base64');
+                    if (eventData.length < 8) continue;
+                    
+                    const discriminator = Array.from(eventData.slice(0, 8));
+                    
+                    if (this.arraysEqual(discriminator, sellEventDiscriminator)) {
+                        return this.parseSellEventFromBuffer(eventData);
+                    }
+                    
+                } catch (parseError) {
+                    continue;
+                }
+            }
+            
+            return null;
+            
+        } catch (error) {
+            logger.debug(`Error parsing event data: ${error.message}`);
+            return null;
+        }
+    }
+    
+    parseSellEventFromBuffer(eventData) {
+        try {
+            let offset = 8; // Skip discriminator
+            
+            const timestamp = eventData.readBigInt64LE(offset); offset += 8;
+            const baseAmountIn = eventData.readBigUInt64LE(offset); offset += 8;
+            const minQuoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
+            
+            // Skip user reserves
+            offset += 16; // userBaseTokenReserves + userQuoteTokenReserves
+            
+            // Skip pool reserves  
+            offset += 16; // poolBaseTokenReserves + poolQuoteTokenReserves
+            
+            const quoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
+            const lpFeeBasisPoints = eventData.readBigUInt64LE(offset); offset += 8;
+            const lpFee = eventData.readBigUInt64LE(offset); offset += 8;
+            const protocolFeeBasisPoints = eventData.readBigUInt64LE(offset); offset += 8;
+            const protocolFee = eventData.readBigUInt64LE(offset); offset += 8;
+            const quoteAmountOutWithoutLpFee = eventData.readBigUInt64LE(offset); offset += 8;
+            const userQuoteAmountOut = eventData.readBigUInt64LE(offset); offset += 8;
+            
+            return {
+                tokensSold: Number(baseAmountIn) / 1e6,
+                solReceived: Number(userQuoteAmountOut) / 1e9,
+                method: 'event_parsing'
+            };
+            
+        } catch (error) {
+            logger.debug(`Error parsing sell event buffer: ${error.message}`);
+            return null;
+        }
+    }
+    
+    arraysEqual(a, b) {
+        return a.length === b.length && a.every((val, i) => val === b[i]);
+    }
+    
+    async closePositionWithRecoveredData(position, sellTxData) {
+        try {
+            logger.info(`🔄 CLOSING POSITION with recovered data: ${position.symbol}`);
+            
+            // Calculate PnL based on recovered data
+            const originalInvestment = position.investedAmount;
+            const pnl = sellTxData.solReceived - originalInvestment;
+            const pnlPercentage = (pnl / originalInvestment) * 100;
+            
+            const finalPosition = {
+                ...position,
+                remainingQuantity: "0",
+                status: 'CLOSED',
+                closedAt: sellTxData.timestamp,
+                closeReason: 'Recovered from blockchain data',
+                finalTxHash: sellTxData.signature,
+                solReceived: sellTxData.solReceived,
+                finalPnL: pnl,
+                recoveredData: true,
+                recoveryMethod: sellTxData.method,
+                updatedAt: Date.now()
+            };
+    
+            // Update session stats
+            this.sessionStats.sessionPnL += pnl;
+            this.sessionStats.liveSellsExecuted++;
+            
+            // Move to trade history
+            await this.movePositionToHistory(finalPosition);
+            this.positions.delete(position.id);
+            await this.savePositions();
+            
+            logger.info(`✅ POSITION RECOVERED & CLOSED: ${position.symbol}`);
+            logger.info(`   Recovery Method: ${sellTxData.method}`);
+            logger.info(`   Tokens Sold: ${sellTxData.tokensSold.toLocaleString()}`);
+            logger.info(`   SOL Received: ${sellTxData.solReceived.toFixed(6)} SOL`);
+            logger.info(`   Final PnL: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(6)} SOL (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
+            logger.info(`   Transaction: ${sellTxData.signature}`);
+            
+            // Send telegram notification for recovered position
+            if (this.telegramService && this.telegramService.isEnabled()) {
+                try {
+                    await this.telegramService.sendRecoveredPositionAlert(finalPosition, sellTxData);
+                } catch (error) {
+                    logger.error('❌ Failed to send Telegram recovery alert:', error.message);
+                }
+            }
+            
+            this.emit('positionRecovered', {
+                position: finalPosition,
+                sellData: sellTxData
+            });
+            
+        } catch (error) {
+            logger.error(`❌ Failed to close position with recovered data: ${error.message}`);
+            throw error;
+        }
+    }
+    
 
     // Enhanced stop loss check that respects pending status
     async checkStopLossWithLiveExecution(position) {

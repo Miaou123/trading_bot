@@ -7,7 +7,7 @@ async function debugSpecificTransaction() {
     const connection = new Connection(process.env.HELIUS_RPC_URL || 'https://api.mainnet-beta.solana.com');
     
     // Your specific transaction signature from the logs
-    const signature = '4dP75Ruacw3J7LMaChSnv28tXcZmMnkmn9KsWC3NY8ecDaJwvvUjFvT9t9GTdqGwBbjLRQYgtwp9ZaDggb9b6PJf';
+    const signature = '2qu4GXScAmi5v9bZ4iWWd7tSEBBbRcXcY8sG6Q4Eyj3q2VhcREnQFDxn5karvDcSphfMPcZMtAnQLTMqKkoNYnmM';
     
     console.log(`🔍 Debugging transaction: ${signature}`);
     

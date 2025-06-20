@@ -507,7 +507,6 @@ class PumpSwapService {
         }
     }
     
-    // 2. Replace your executeSell method with this enhanced version:
     async executeSell(tokenMint, tokenAmount, customSlippage = null) {
         try {
             if (!this.wallet || !this.program) {
@@ -531,6 +530,21 @@ class PumpSwapService {
             const mintPubkey = new PublicKey(tokenMint);
             const quoteMint = this.WSOL_MINT;
     
+            // Get required accounts
+            const userBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
+            const userQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, this.wallet.publicKey);
+    
+            // 🔥 NEW: Check if user base token account exists
+            logger.info(`🔍 Checking if token account exists: ${userBaseTokenAccount.toString()}`);
+            const baseAccountInfo = await this.connection.getAccountInfo(userBaseTokenAccount);
+            
+            if (!baseAccountInfo) {
+                logger.warn(`⚠️ Token account does not exist! This should not happen after a buy.`);
+                logger.warn(`🔧 Will create the account during sell transaction.`);
+            } else {
+                logger.info(`✅ Token account exists and ready for selling`);
+            }
+    
             // Calculate amounts
             const baseAmountIn = new BN(Math.floor(tokenAmount * 1e6));
             const expectedSolOutput = await this.getExpectedSolOutput(poolAddress, baseAmountIn, mintPubkey);
@@ -544,8 +558,6 @@ class PumpSwapService {
             const protocolFeeRecipients = await this.getProtocolFeeRecipients();
             const protocolFeeRecipient = protocolFeeRecipients[0] || this.wallet.publicKey;
     
-            const userBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, this.wallet.publicKey);
-            const userQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, this.wallet.publicKey);
             const poolBaseTokenAccount = getAssociatedTokenAddressSync(mintPubkey, poolAddress, true);
             const poolQuoteTokenAccount = getAssociatedTokenAddressSync(quoteMint, poolAddress, true);
             const protocolFeeRecipientTokenAccount = getAssociatedTokenAddressSync(quoteMint, protocolFeeRecipient, true);
@@ -561,10 +573,9 @@ class PumpSwapService {
                 const coinCreator = await this.getPoolCoinCreator(poolAddress);
                 
                 if (coinCreator && !coinCreator.equals(PublicKey.default)) {
-                    // 🔥 CORRECT: Same as buy method
                     const [derivedCoinCreatorVaultAuthority] = PublicKey.findProgramAddressSync(
                         [Buffer.from("creator_vault"), coinCreator.toBytes()],
-                        this.PUMPSWAP_PROGRAM_ID  // ✅ Correct program
+                        this.PUMPSWAP_PROGRAM_ID
                     );
                     
                     coinCreatorVaultAuthority = derivedCoinCreatorVaultAuthority;
@@ -585,6 +596,19 @@ class PumpSwapService {
                 ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
                 ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 })
             );
+    
+            // 🔥 NEW: Always create base token account if it doesn't exist (defensive programming)
+            if (!baseAccountInfo) {
+                logger.info(`🔧 Adding instruction to create missing token account`);
+                instructions.push(
+                    createAssociatedTokenAccountIdempotentInstruction(
+                        this.wallet.publicKey,
+                        userBaseTokenAccount,
+                        this.wallet.publicKey,
+                        mintPubkey
+                    )
+                );
+            }
     
             // Create WSOL account if needed
             instructions.push(
@@ -633,7 +657,7 @@ class PumpSwapService {
                 )
             );
     
-            // 🔥 NEW: Build and send transaction with direct event parsing
+            // Build and send transaction with direct event parsing
             const signature = await this.sendAndConfirmWithDirectEventParsing(instructions);
     
             this.stats.sellsExecuted++;
@@ -643,7 +667,7 @@ class PumpSwapService {
             logger.info(`   Pool Used: ${poolAddress.toString()}`);
             logger.info(`   Explorer: https://solscan.io/tx/${signature}`);
     
-            // 🔥 NEW: Get exact amounts from direct event parsing
+            // Get exact amounts from direct event parsing
             const exactAmounts = this.getLastTradeData();
             
             if (exactAmounts && exactAmounts.success) {
@@ -687,9 +711,6 @@ class PumpSwapService {
         }
     }
     
-    // 3. ADD these new methods to your class:
-    
-    // 🔥 NEW: Send transaction and parse events directly from confirmation logs
     async sendAndConfirmWithDirectEventParsing(instructions) {
         try {
             // Build transaction
