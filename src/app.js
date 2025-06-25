@@ -1,4 +1,4 @@
-// src/app.js - Trading bot with Twitter testing mode
+// src/app.js - Complete Trading App with Holder Concentration Checks
 require('dotenv').config();
 const logger = require('./utils/logger');
 const TradingWebSocket = require('./services/tradingWebSocket');
@@ -8,15 +8,18 @@ const PositionManager = require('./bot/positionManager');
 class TradingApp {
     constructor() {
         this.botMode = process.env.BOT_MODE || 'both';
-        
-        // 🔥 TESTING MODE: Disable Twitter checks
         this.disableTwitterCheck = process.env.DISABLE_TWITTER_CHECK === 'true' || false;
         
         this.config = {
             tradingMode: process.env.TRADING_MODE || 'paper',
             initialInvestment: parseFloat(process.env.INITIAL_INVESTMENT_SOL) || 0.01,
             minTwitterLikes: parseInt(process.env.MIN_TWITTER_LIKES) || 100,
-            maxPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS) || 10
+            maxPositions: parseInt(process.env.MAX_CONCURRENT_POSITIONS) || 10,
+            
+            // 🔥 NEW: Holder concentration check configuration
+            enableHolderCheck: process.env.ENABLE_HOLDER_CHECKS !== 'false',
+            holderConcentrationThreshold: parseInt(process.env.HOLDER_CONCENTRATION_THRESHOLD) || 70,
+            skipChecksInPaperMode: process.env.SKIP_CHECKS_IN_PAPER_MODE === 'true'
         };
 
         this.positionManager = new PositionManager({
@@ -24,17 +27,20 @@ class TradingApp {
             maxPositions: this.config.maxPositions 
         });
 
+        // 🔥 UPDATED: Pass holder check configuration to trading bot
         this.tradingBot = new TradingBot({
             tradingMode: this.config.tradingMode,
             positionManager: this.positionManager,
-            initialInvestment: this.config.initialInvestment
+            initialInvestment: this.config.initialInvestment,
+            enableHolderCheck: this.config.enableHolderCheck,
+            holderConcentrationThreshold: this.config.holderConcentrationThreshold,
+            skipChecksInPaperMode: this.config.skipChecksInPaperMode
         });
 
-        // 🔥 PASS TWITTER TESTING MODE TO WEBSOCKET
         this.webSocket = new TradingWebSocket({
             minLikes: this.config.minTwitterLikes,
             botMode: this.botMode,
-            disableTwitterCheck: this.disableTwitterCheck // Pass testing mode
+            disableTwitterCheck: this.disableTwitterCheck
         });
 
         this.isRunning = false;
@@ -51,8 +57,7 @@ class TradingApp {
                 return;
             }
             
-            // 🔥 LOG TESTING MODE STATUS
-            const twitterStatus = this.disableTwitterCheck ? 
+            const twitterStatus = this.disableTwitterCheck ?
                 'NO TWITTER CHECK' : `${tokenData.twitter.likes} likes`;
             
             logger.info(`💰 PROCESSING: ${tokenData.token.symbol} (${eventType}) - ${twitterStatus}`);
@@ -71,6 +76,17 @@ class TradingApp {
 
         this.tradingBot.on('tradeExecuted', (tradeData) => {
             logger.info(`🎯 Trade executed: ${tradeData.type} ${tradeData.symbol}`);
+            if (tradeData.validation) {
+                logger.info(`📊 Holder concentration was: ${tradeData.validation.holderCheck.concentration?.toFixed(1)}%`);
+            }
+        });
+
+        // 🔥 NEW: Listen for blocked trades due to holder concentration
+        this.tradingBot.on('tradeBlocked', (blockData) => {
+            logger.warn(`🚫 Trade blocked: ${blockData.symbol} - ${blockData.reason}`);
+            if (blockData.holderConcentration) {
+                logger.warn(`📊 Holder concentration: ${blockData.holderConcentration.toFixed(1)}%`);
+            }
         });
     }
 
@@ -96,7 +112,16 @@ class TradingApp {
             logger.info(`📊 Mode: ${this.config.tradingMode.toUpperCase()}`);
             logger.info(`🎯 Bot Mode: ${this.botMode.toUpperCase()}`);
             
-            // 🔥 LOG TESTING MODE STATUS
+            // 🔥 NEW: Log holder check configuration
+            if (this.config.enableHolderCheck) {
+                logger.info(`🔍 Holder checks ENABLED - Max concentration: ${this.config.holderConcentrationThreshold}%`);
+                if (this.config.skipChecksInPaperMode && this.config.tradingMode === 'paper') {
+                    logger.info(`📝 Holder checks SKIPPED in paper mode`);
+                }
+            } else {
+                logger.warn(`⚠️ Holder checks DISABLED - Trading without concentration validation!`);
+            }
+            
             if (this.disableTwitterCheck) {
                 logger.info('🚫 TESTING MODE: Twitter checks DISABLED - Will trade ALL tokens!');
                 logger.warn('⚠️  This is for TESTING only - all migration tokens will be traded!');
@@ -134,7 +159,26 @@ class TradingApp {
         }
     }
 
-    // 🔥 NEW: Toggle Twitter check at runtime
+    // 🔥 NEW: Runtime configuration methods
+    updateHolderCheckSettings(settings) {
+        this.tradingBot.updateHolderCheckSettings(settings);
+        
+        // Update local config
+        if (settings.enabled !== undefined) {
+            this.config.enableHolderCheck = settings.enabled;
+        }
+        if (settings.threshold !== undefined) {
+            this.config.holderConcentrationThreshold = settings.threshold;
+        }
+        if (settings.skipInPaperMode !== undefined) {
+            this.config.skipChecksInPaperMode = settings.skipInPaperMode;
+        }
+    }
+
+    getHolderCheckStatus() {
+        return this.tradingBot.getPreTradeCheckStatus();
+    }
+
     toggleTwitterCheck(enabled) {
         this.disableTwitterCheck = !enabled;
         this.webSocket.setTwitterCheckEnabled(enabled);
@@ -169,15 +213,27 @@ class TradingApp {
     }
 
     getStatus() {
-        return {
+        const baseStatus = {
             isRunning: this.isRunning,
             mode: this.config.tradingMode,
             botMode: this.botMode,
-            twitterCheckEnabled: !this.disableTwitterCheck, // 🔥 NEW STATUS
+            twitterCheckEnabled: !this.disableTwitterCheck,
             minLikes: this.config.minTwitterLikes,
             maxPositions: this.config.maxPositions,
             positions: this.positionManager.getActivePositionsCount(),
             connected: this.webSocket.isConnected
+        };
+
+        // 🔥 NEW: Add holder check status
+        const holderCheckStatus = this.getHolderCheckStatus();
+        
+        return {
+            ...baseStatus,
+            holderChecks: {
+                enabled: holderCheckStatus.enableHolderCheck,
+                threshold: holderCheckStatus.holderConcentrationThreshold,
+                skipInPaperMode: holderCheckStatus.skipChecksInPaperMode
+            }
         };
     }
 }

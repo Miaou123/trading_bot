@@ -10,7 +10,6 @@ class PositionManager extends EventEmitter {
         super();
         
         this.config = {
-            tradingMode: config.tradingMode || 'paper',
             positionsFile: config.positionsFile || './positions.json',
             tradesHistoryFile: config.tradesHistoryFile || './trades_history.json',
             maxPositions: config.maxPositions || 20,
@@ -42,7 +41,6 @@ class PositionManager extends EventEmitter {
             fallbackPriceUpdates: 0,
             priceUpdateFailures: 0,
             liveSellsExecuted: 0,
-            paperSellsExecuted: 0,
             stopLossExecutions: 0,
             takeProfitExecutions: 0,
             sessionPnL: 0,
@@ -54,9 +52,7 @@ class PositionManager extends EventEmitter {
         };
 
         // Initialize Telegram service
-        this.telegramService = new TelegramService({
-            tradingMode: this.config.tradingMode
-        });
+        this.telegramService = new TelegramService();
         
         this.loadPositions();
         this.startEnhancedPriceUpdates();
@@ -128,10 +124,9 @@ class PositionManager extends EventEmitter {
                 logger.info(`   🔧 Pool-based: ${poolBased.successes}/${poolBased.attempts} (${poolSuccess}%) avg: ${poolAvg}ms`);
                 logger.info(`   🪐 Fallback: ${fallback.successes}/${fallback.attempts} (${fallbackSuccess}%) avg: ${fallbackAvg}ms`);
                 
-                if (this.sessionStats.liveSellsExecuted > 0 || this.sessionStats.paperSellsExecuted > 0) {
+                if (this.sessionStats.liveSellsExecuted > 0) {
                     logger.info('💰 SESSION TRADING STATS:');
                     logger.info(`   🚀 Live sells: ${this.sessionStats.liveSellsExecuted}`);
-                    logger.info(`   📝 Paper sells: ${this.sessionStats.paperSellsExecuted}`);
                     logger.info(`   🛑 Stop losses: ${this.sessionStats.stopLossExecutions}`);
                     logger.info(`   🎯 Take profits: ${this.sessionStats.takeProfitExecutions}`);
                     logger.info(`   💎 Session PnL: ${this.sessionStats.sessionPnL.toFixed(6)} SOL`);
@@ -336,6 +331,7 @@ class PositionManager extends EventEmitter {
         logger.debug(`${position.symbol}: ${newPrice.toFixed(8)} SOL (${priceChange > 0 ? '+' : ''}${priceChange.toFixed(2)}%) via ${source}`);
     }
 
+
     async executePumpSwapSell(position, sellPercentage, reason = 'Manual Sell') {
         try {
             // Prevent double-selling
@@ -343,35 +339,52 @@ class PositionManager extends EventEmitter {
                 logger.warn(`⚠️ Position ${position.symbol} already has pending sell`);
                 return { success: false, error: 'Sell already pending' };
             }
-    
+
             // Update position to pending
             position.status = 'PENDING_SELL';
             position.pendingReason = reason;
             position.pendingSellPercentage = sellPercentage;
             position.pendingStartTime = Date.now();
+            position.pendingTokenAmount = (parseFloat(position.quantity) * sellPercentage / 100);
             position.retryCount = (position.retryCount || 0);
             
             this.positions.set(position.id, position);
             await this.savePositions();
-    
+
             logger.info(`⏳ Position ${position.symbol} set to PENDING_SELL`);
-    
-            if (this.config.tradingMode === 'live') {
-                return await this.executeLiveSell(position, sellPercentage, reason);
-            } else {
-                return await this.executePaperSell(position, sellPercentage, reason);
+            logger.info(`🚀 Executing LIVE sell: ${position.pendingTokenAmount} ${position.symbol} (${reason})`);
+            
+            // 🔥 CORRECT: Call the trading bot's method, not PumpSwap service directly
+            if (!this.tradingBot) {
+                throw new Error('Trading bot not connected to position manager');
             }
-    
+
+            const sellResult = await this.tradingBot.executePumpSwapSell(position, sellPercentage, reason);
+
+            if (sellResult && sellResult.success && sellResult.signature) {
+                logger.info(`✅ Live sell submitted: ${sellResult.signature}`);
+                return sellResult;
+            } else {
+                throw new Error('Sell transaction failed - no signature returned');
+            }
+
         } catch (error) {
-            // 🔥 NEW: Add verification logic here after 3 failures
+            logger.error(`❌ Live sell execution failed:`, error.message);
+            
+            // Enhanced error handling with verification system
             position.retryCount = (position.retryCount || 0) + 1;
             
             if (position.retryCount >= 3 && error.message.includes('insufficient funds')) {
                 logger.warn(`🔍 INSUFFICIENT FUNDS after ${position.retryCount} attempts - verifying tokens...`);
                 
-                const recovered = await this.verifyTokensAndRecoverPosition(position, error.message);
-                if (recovered) {
-                    return { success: true, recovered: true };
+                try {
+                    const recovered = await this.verifyTokensAndRecoverPosition(position, error.message);
+                    if (recovered) {
+                        logger.info(`✅ Position ${position.symbol} recovered successfully`);
+                        return { success: true, recovered: true };
+                    }
+                } catch (verifyError) {
+                    logger.error(`❌ Verification failed: ${verifyError.message}`);
                 }
             }
             
@@ -379,16 +392,18 @@ class PositionManager extends EventEmitter {
             if (position.retryCount >= this.config.maxRetries) {
                 await this.moveToManualReview(position, `Max retries exceeded: ${error.message}`);
             } else {
+                // Reset position to ACTIVE for retry
                 position.status = 'ACTIVE';
                 position.lastRetryError = error.message;
                 this.positions.set(position.id, position);
                 await this.savePositions();
+                
+                logger.warn(`⚠️ Sell failed (attempt ${position.retryCount}/${this.config.maxRetries}), resetting to ACTIVE`);
             }
             
             throw error;
         }
     }
-    
 
     // Schedule confirmation check after delay
     scheduleConfirmationCheck(positionId, txHash) {
@@ -1284,9 +1299,8 @@ class PositionManager extends EventEmitter {
         }
         
         const priceSourceInfo = position.priceSource ? ` (${position.priceSource})` : '';
-        const tradingModeInfo = position.paperTrade ? ' [PAPER]' : ' [LIVE]';
-        
-        logger.info(`📈 Position: ${position.symbol} @ ${position.entryPrice.toFixed(8)} SOL${priceSourceInfo}${tradingModeInfo}`);
+ 
+        logger.info(`📈 Position: ${position.symbol} @ ${position.entryPrice.toFixed(8)} SOL${priceSourceInfo}`);
         if (position.stopLossPrice) {
             logger.info(`📉 Stop Loss: ${position.stopLossPrice.toFixed(8)} SOL`);
         }
@@ -1317,7 +1331,6 @@ class PositionManager extends EventEmitter {
                     ((closedPosition.finalPnL / closedPosition.investedAmount) * 100) : 0,
                 exitReason: closedPosition.closeReason || closedPosition.reviewReason,
                 duration: (closedPosition.closedAt || Date.now()) - (closedPosition.entryTime || closedPosition.createdAt),
-                tradingMode: closedPosition.paperTrade ? 'paper' : 'live',
                 entryTxHash: closedPosition.txHash,
                 exitTxHash: closedPosition.finalTxHash,
                 eventType: closedPosition.eventType,

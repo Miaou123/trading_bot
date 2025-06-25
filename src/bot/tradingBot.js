@@ -2,6 +2,7 @@
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
 const PumpSwapService = require('../services/pumpSwapService');
+const HolderConcentrationChecker = require('../analysis/holderConcentrationChecker');
 
 class TradingBot extends EventEmitter {
     constructor(config = {}) {
@@ -61,6 +62,21 @@ class TradingBot extends EventEmitter {
 
         this.isTradingEnabled = true;
         this.isInitialized = false;
+    
+        // Add holder concentration checker
+        this.holderChecker = new HolderConcentrationChecker();
+
+        // Configuration for pre-trade checks
+        this.preTradeChecks = {
+            enableHolderCheck: config.enableHolderCheck !== false, // Default enabled
+            holderConcentrationThreshold: config.holderConcentrationThreshold || 70,
+            skipChecksInPaperMode: config.skipChecksInPaperMode || false
+        };
+        
+        // Update the checker threshold if custom value provided
+        if (config.holderConcentrationThreshold) {
+            this.holderChecker.setConcentrationThreshold(config.holderConcentrationThreshold);
+        }
     }
 
     async initialize() {
@@ -116,6 +132,64 @@ class TradingBot extends EventEmitter {
             return null;
         }
     }
+
+        // Add this new method to your TradingBot class
+        async performPreTradeValidation(tokenAddress, symbol) {
+            logger.info(`🔍 Performing pre-trade validation for ${symbol} (${tokenAddress})`);
+            
+            const validationResults = {
+                holderCheck: { passed: true, reason: 'Skipped' },
+                overallSafe: true,
+                reasons: []
+            };
+    
+            // Skip all checks in paper mode if configured
+            if (this.config.tradingMode === 'paper' && this.preTradeChecks.skipChecksInPaperMode) {
+                logger.info(`📝 PAPER MODE: Skipping pre-trade validation checks`);
+                return validationResults;
+            }
+    
+            // Holder concentration check
+            if (this.preTradeChecks.enableHolderCheck) {
+                try {
+                    logger.info(`📊 Checking holder concentration for ${symbol}...`);
+                    const holderResult = await this.holderChecker.checkConcentration(tokenAddress);
+                    
+                    validationResults.holderCheck = {
+                        passed: holderResult.safe,
+                        concentration: holderResult.concentration,
+                        holderCount: holderResult.holderCount,
+                        reason: holderResult.reason || `${holderResult.concentration.toFixed(1)}% concentration`
+                    };
+    
+                    if (!holderResult.safe) {
+                        validationResults.overallSafe = false;
+                        validationResults.reasons.push(`Holder concentration: ${holderResult.reason}`);
+                        logger.warn(`🚫 HOLDER CHECK FAILED: ${symbol} - ${holderResult.reason}`);
+                    } else {
+                        logger.info(`✅ HOLDER CHECK PASSED: ${symbol} - ${holderResult.concentration.toFixed(1)}% concentration`);
+                    }
+    
+                } catch (error) {
+                    logger.error(`❌ Holder check error for ${symbol}: ${error.message}`);
+                    validationResults.holderCheck = {
+                        passed: false,
+                        reason: `Check failed: ${error.message}`
+                    };
+                    validationResults.overallSafe = false;
+                    validationResults.reasons.push('Holder check failed');
+                }
+            }
+    
+            // Log overall result
+            if (validationResults.overallSafe) {
+                logger.info(`✅ Pre-trade validation PASSED for ${symbol}`);
+            } else {
+                logger.warn(`🚫 Pre-trade validation FAILED for ${symbol}: ${validationResults.reasons.join(', ')}`);
+            }
+    
+            return validationResults;
+        }
 
     // Execute buy order (LIVE ONLY)
     async executeBuy(alert) {
@@ -310,24 +384,127 @@ class TradingBot extends EventEmitter {
     }
 
     // Process incoming alerts
-    async processAlert(alert) {
+    async processAlert(alertData) {
         if (!this.isTradingEnabled || !this.isInitialized) return;
 
         try {
-            this.stats.alertsProcessed++;
+            const { token, twitter, confidence } = alertData;
+            const symbol = token.symbol || 'Unknown';
             
-            logger.info(`🔔 Processing alert: ${alert.token.symbol}`);
+            this.stats.alertsProcessed++; // 🔥 INCREMENT STATS
+            logger.info(`🎯 Processing alert: ${symbol} (${token.address})`);
 
-            if (this.positionManager?.hasPosition(alert.token.address)) {
-                logger.info(`⏭️ Already have position in ${alert.token.symbol}`);
+            // Check if we already have a position in this token FIRST
+            if (this.positionManager?.hasPosition(token.address)) {
+                logger.info(`⏭️ Already have position in ${symbol}`);
                 return;
             }
 
-            await this.executeBuy(alert);
+            // Check if we can accept new positions
+            if (!this.canAcceptNewPosition()) {
+                logger.warn(`⚠️ Cannot accept new position: ${this.getPositionLimitReason()}`);
+                return;
+            }
+
+            // 🔥 Pre-trade validation with holder concentration check
+            const validation = await this.performPreTradeValidation(token.address, symbol);
+            
+            if (!validation.overallSafe) {
+                logger.warn(`🚫 TRADE BLOCKED: ${symbol} failed pre-trade validation`);
+                logger.warn(`📋 Validation failures: ${validation.reasons.join(', ')}`);
+                
+                // Emit event for monitoring
+                this.emit('tradeBlocked', {
+                    symbol,
+                    address: token.address,
+                    reason: 'Pre-trade validation failed',
+                    details: validation.reasons,
+                    holderConcentration: validation.holderCheck.concentration
+                });
+                
+                return;
+            }
+
+            // Continue with existing buy logic...
+            logger.info(`✅ Pre-trade validation passed, proceeding with buy order for ${symbol}`);
+            
+            // 🔥 FIXED: Call the correct method name
+            const buyResult = await this.executeBuy(alertData);
+            
+            if (buyResult) {
+                logger.info(`🎯 Buy order successful for ${symbol}`);
+                this.emit('tradeExecuted', {
+                    type: 'BUY',
+                    symbol,
+                    address: token.address,
+                    result: buyResult,
+                    validation: validation // Include validation results
+                });
+            }
+
         } catch (error) {
-            logger.error(`❌ Error processing alert: ${error.message}`);
+            logger.error(`❌ Error processing alert:`, error);
             this.stats.errors++;
         }
+    }
+
+    // Check if we can accept new positions
+    canAcceptNewPosition() {
+        if (!this.positionManager) {
+            logger.debug('No position manager available - allowing position');
+            return true;
+        }
+        
+        const activePositions = this.positionManager.getActivePositionsCount();
+        const maxPositions = this.positionManager.config?.maxPositions || 10;
+        const canAccept = activePositions < maxPositions;
+        
+        logger.debug(`Position check: ${activePositions}/${maxPositions} positions - ${canAccept ? 'CAN' : 'CANNOT'} accept new`);
+        return canAccept;
+    }
+
+    // Get reason why we can't accept new positions
+    getPositionLimitReason() {
+        if (!this.positionManager) {
+            return 'Position manager not available';
+        }
+        
+        const activePositions = this.positionManager.getActivePositionsCount();
+        const maxPositions = this.positionManager.config?.maxPositions || 10;
+        
+        if (activePositions >= maxPositions) {
+            return `Maximum positions reached: ${activePositions}/${maxPositions}`;
+        }
+        
+        return `Active positions: ${activePositions}/${maxPositions}`;
+    }
+    
+
+    // Add method to update holder check settings at runtime
+    updateHolderCheckSettings(settings) {
+        if (settings.enabled !== undefined) {
+            this.preTradeChecks.enableHolderCheck = settings.enabled;
+            logger.info(`📊 Holder checks ${settings.enabled ? 'ENABLED' : 'DISABLED'}`);
+        }
+
+        if (settings.threshold !== undefined && settings.threshold >= 0 && settings.threshold <= 100) {
+            this.preTradeChecks.holderConcentrationThreshold = settings.threshold;
+            this.holderChecker.setConcentrationThreshold(settings.threshold);
+            logger.info(`📊 Holder concentration threshold updated to ${settings.threshold}%`);
+        }
+
+        if (settings.skipInPaperMode !== undefined) {
+            this.preTradeChecks.skipChecksInPaperMode = settings.skipInPaperMode;
+            logger.info(`📝 Skip checks in paper mode: ${settings.skipInPaperMode}`);
+        }
+    }
+
+    // Add method to get current pre-trade check status
+    getPreTradeCheckStatus() {
+        return {
+            ...this.preTradeChecks,
+            holderCheckerConfig: this.holderChecker.getConfig()
+        };
     }
 
     // Get trading statistics
