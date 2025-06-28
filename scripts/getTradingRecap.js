@@ -1,26 +1,111 @@
-// scripts/getTradingRecap.js - Clean trading bot performance recap
+// scripts/getTradingRecap.js - Clean trading bot performance recap with timeframe support
 require('dotenv').config();
 const fs = require('fs').promises;
 const path = require('path');
 
 class TradingRecap {
-    constructor() {
+    constructor(timeframe = null) {
         this.positionsFile = './positions.json';
         this.tradesHistoryFile = './trades_history.json';
+        this.timeframe = timeframe;
+        this.timeframeStart = this.calculateTimeframeStart(timeframe);
+    }
+
+    calculateTimeframeStart(timeframe) {
+        if (!timeframe) return null;
+        
+        const now = Date.now();
+        const timeframeLower = timeframe.toLowerCase();
+        
+        // Parse timeframe (e.g., "1h", "6h", "1d", "7d", "30d", "1w", "1m", "1y")
+        const match = timeframeLower.match(/^(\d+)([hdwmy])$/);
+        if (!match) {
+            throw new Error(`Invalid timeframe format: ${timeframe}. Use format like 1h, 6h, 1d, 7d, 30d, 1w, 1m, 1y`);
+        }
+        
+        const [, amount, unit] = match;
+        const value = parseInt(amount);
+        
+        switch (unit) {
+            case 'h': // hours
+                return now - (value * 60 * 60 * 1000);
+            case 'd': // days
+                return now - (value * 24 * 60 * 60 * 1000);
+            case 'w': // weeks
+                return now - (value * 7 * 24 * 60 * 60 * 1000);
+            case 'm': // months (approximate)
+                return now - (value * 30 * 24 * 60 * 60 * 1000);
+            case 'y': // years (approximate)
+                return now - (value * 365 * 24 * 60 * 60 * 1000);
+            default:
+                throw new Error(`Unsupported time unit: ${unit}`);
+        }
+    }
+
+    formatTimeframe() {
+        if (!this.timeframe) return 'All Time';
+        
+        const timeframeLower = this.timeframe.toLowerCase();
+        const match = timeframeLower.match(/^(\d+)([hdwmy])$/);
+        if (!match) return this.timeframe;
+        
+        const [, amount, unit] = match;
+        const value = parseInt(amount);
+        
+        const unitNames = {
+            'h': value === 1 ? 'Hour' : 'Hours',
+            'd': value === 1 ? 'Day' : 'Days', 
+            'w': value === 1 ? 'Week' : 'Weeks',
+            'm': value === 1 ? 'Month' : 'Months',
+            'y': value === 1 ? 'Year' : 'Years'
+        };
+        
+        return `Last ${value} ${unitNames[unit]}`;
+    }
+
+    filterByTimeframe(items, timeProperty = 'entryTime') {
+        if (!this.timeframeStart) return items;
+        
+        return items.filter(item => {
+            const timestamp = item[timeProperty] || item.createdAt || item.timestamp;
+            return timestamp && timestamp >= this.timeframeStart;
+        });
+    }
+
+    filterActivePositionsByTimeframe(activePositions) {
+        if (!this.timeframeStart) return activePositions;
+        
+        return activePositions.filter(pos => {
+            const entryTime = pos.entryTime || pos.createdAt;
+            return entryTime && entryTime >= this.timeframeStart;
+        });
     }
 
     async generateRecap() {
         try {
-            console.log('📊 TRADING BOT PERFORMANCE RECAP');
-            console.log('=' .repeat(50));
+            const timeframeText = this.formatTimeframe();
+            console.log(`📊 TRADING BOT PERFORMANCE RECAP - ${timeframeText}`);
+            console.log('=' .repeat(50 + timeframeText.length));
             
             // Load data from both files
-            const activePositions = await this.loadActivePositions();
-            const tradeHistory = await this.loadTradeHistory();
+            const allActivePositions = await this.loadActivePositions();
+            const allTradeHistory = await this.loadTradeHistory();
+            
+            // Apply timeframe filtering
+            const activePositions = this.filterActivePositionsByTimeframe(allActivePositions);
+            const tradeHistory = this.filterByTimeframe(allTradeHistory, 'exitTime');
             
             if (activePositions.length === 0 && tradeHistory.length === 0) {
-                console.log('❌ No trading data found');
+                console.log(`❌ No trading data found for timeframe: ${timeframeText}`);
+                console.log(`   Total positions: ${allActivePositions.length} active, ${allTradeHistory.length} completed`);
                 return;
+            }
+
+            // Show filtering info if timeframe is applied
+            if (this.timeframeStart) {
+                console.log(`\n🕐 TIMEFRAME FILTER: ${timeframeText}`);
+                console.log(`   From: ${new Date(this.timeframeStart).toLocaleString()}`);
+                console.log(`   Filtered: ${activePositions.length}/${allActivePositions.length} active, ${tradeHistory.length}/${allTradeHistory.length} completed`);
             }
 
             // Generate comprehensive recap
@@ -218,10 +303,26 @@ class TradingRecap {
 
 // CLI interface
 async function main() {
-    const action = process.argv[2] || 'recap';
-    const recap = new TradingRecap();
+    const args = process.argv.slice(2);
+    const action = args[0] || 'recap';
+    
+    // Check if first argument looks like a timeframe
+    const timeframePattern = /^(\d+)([hdwmy])$/i;
+    let timeframe = null;
+    let actualAction = action;
+    
+    if (timeframePattern.test(action)) {
+        // First argument is a timeframe
+        timeframe = action;
+        actualAction = args[1] || 'recap';
+    } else if (args[1] && timeframePattern.test(args[1])) {
+        // Second argument is a timeframe
+        timeframe = args[1];
+    }
 
-    switch (action) {
+    const recap = new TradingRecap(timeframe);
+
+    switch (actualAction) {
         case 'recap':
         case 'summary':
         case 'stats':
@@ -236,15 +337,29 @@ async function main() {
             console.log('  • positions.json (active positions)');
             console.log('  • trades_history.json (completed trades)');
             console.log('');
-            console.log('Usage: node scripts/getTradingRecap.js [action]');
+            console.log('Usage: node scripts/getTradingRecap.js [timeframe] [action]');
+            console.log('       node scripts/getTradingRecap.js [action] [timeframe]');
+            console.log('');
+            console.log('Timeframes:');
+            console.log('  1h, 6h, 12h    - Hours');
+            console.log('  1d, 7d, 30d    - Days');
+            console.log('  1w, 4w         - Weeks');
+            console.log('  1m, 6m, 12m    - Months');
+            console.log('  1y             - Years');
+            console.log('  (none)         - All time');
             console.log('');
             console.log('Actions:');
             console.log('  recap    - Show comprehensive trading recap (default)');
             console.log('  help     - Show this help message');
             console.log('');
             console.log('Examples:');
-            console.log('  node scripts/getTradingRecap.js');
-            console.log('  node scripts/getTradingRecap.js recap');
+            console.log('  node scripts/getTradingRecap.js                # All time recap');
+            console.log('  node scripts/getTradingRecap.js 1d             # Last 24 hours');
+            console.log('  node scripts/getTradingRecap.js 7d             # Last 7 days');
+            console.log('  node scripts/getTradingRecap.js 1h recap       # Last hour recap');
+            console.log('  node scripts/getTradingRecap.js recap 30d      # Last 30 days recap');
+            console.log('  node scripts/getTradingRecap.js 1w             # Last week');
+            console.log('  node scripts/getTradingRecap.js 6m             # Last 6 months');
             break;
             
         default:
