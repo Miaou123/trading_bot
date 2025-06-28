@@ -339,7 +339,7 @@ class PositionManager extends EventEmitter {
                 logger.warn(`⚠️ Position ${position.symbol} already has pending sell`);
                 return { success: false, error: 'Sell already pending' };
             }
-
+    
             // Update position to pending
             position.status = 'PENDING_SELL';
             position.pendingReason = reason;
@@ -350,24 +350,47 @@ class PositionManager extends EventEmitter {
             
             this.positions.set(position.id, position);
             await this.savePositions();
-
+    
             logger.info(`⏳ Position ${position.symbol} set to PENDING_SELL`);
             logger.info(`🚀 Executing LIVE sell: ${position.pendingTokenAmount} ${position.symbol} (${reason})`);
             
-            // 🔥 CORRECT: Call the trading bot's method, not PumpSwap service directly
             if (!this.tradingBot) {
                 throw new Error('Trading bot not connected to position manager');
             }
-
+    
             const sellResult = await this.tradingBot.executePumpSwapSell(position, sellPercentage, reason);
-
+    
             if (sellResult && sellResult.success && sellResult.signature) {
                 logger.info(`✅ Live sell submitted: ${sellResult.signature}`);
+                
+                // 🔥 CRITICAL FIX: Handle the successful transaction immediately
+                if (sellResult.exactData && sellResult.exactData.success) {
+                    // We have exact parsed amounts - update position immediately
+                    logger.info(`🎯 Processing exact transaction data immediately`);
+                    
+                    await this.updatePositionAfterSell(
+                        position.id,
+                        sellResult.exactData.exactTokensSold,
+                        sellResult.exactData.exactSolReceived,
+                        sellResult.exactData.calculatedPnL || (sellResult.exactData.exactSolReceived - (sellResult.exactData.exactTokensSold * position.entryPrice)),
+                        sellResult.signature,
+                        reason
+                    );
+                    
+                    this.sessionStats.liveSellsExecuted++;
+                    this.sessionStats.sessionPnL += sellResult.exactData.calculatedPnL || 0;
+                    
+                } else {
+                    // No exact data available - use traditional confirmation check
+                    logger.info(`📋 Scheduling confirmation check for ${sellResult.signature}`);
+                    this.scheduleConfirmationCheck(position.id, sellResult.signature);
+                }
+                
                 return sellResult;
             } else {
                 throw new Error('Sell transaction failed - no signature returned');
             }
-
+    
         } catch (error) {
             logger.error(`❌ Live sell execution failed:`, error.message);
             
@@ -660,71 +683,59 @@ class PositionManager extends EventEmitter {
             logger.info(`   Tokens Sold: ${tokensSold.toLocaleString()}`);
             logger.info(`   SOL Received: ${solReceived.toFixed(6)} SOL`);
             logger.info(`   PnL: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(6)} SOL`);
-            logger.info(`   Signature: ${signature}`);
     
-            // Calculate new remaining quantity using EXACT transaction data
-            const currentRemainingQuantity = parseFloat(position.remainingQuantity);
-            const newRemainingQuantity = currentRemainingQuantity - tokensSold;
-            
-            // Calculate percentages
             const originalQuantity = parseFloat(position.quantity);
-            const soldPercentageOfOriginal = (tokensSold / originalQuantity) * 100;
+            const currentRemainingQuantity = parseFloat(position.remainingQuantity || position.quantity);
+            const newRemainingQuantity = Math.max(0, currentRemainingQuantity - tokensSold);
             const remainingPercentageOfOriginal = (newRemainingQuantity / originalQuantity) * 100;
-            const soldPercentageOfRemaining = (tokensSold / currentRemainingQuantity) * 100;
+            
+            // Calculate sell percentage
+            const soldPercentage = (tokensSold / currentRemainingQuantity) * 100;
     
             logger.info(`📊 POSITION UPDATE CALCULATIONS:`);
             logger.info(`   Original Quantity: ${originalQuantity.toLocaleString()} tokens`);
             logger.info(`   Previous Remaining: ${currentRemainingQuantity.toLocaleString()} tokens`);
-            logger.info(`   Tokens Sold: ${tokensSold.toLocaleString()} tokens (${soldPercentageOfRemaining.toFixed(1)}% of remaining)`);
+            logger.info(`   Tokens Sold: ${tokensSold.toLocaleString()} tokens (${soldPercentage.toFixed(1)}% of remaining)`);
             logger.info(`   New Remaining: ${newRemainingQuantity.toLocaleString()} tokens (${remainingPercentageOfOriginal.toFixed(1)}% of original)`);
     
-            // Update position with new remaining quantity
-            const updatedPosition = {
-                ...position,
-                remainingQuantity: newRemainingQuantity.toString(),
-                totalRealizedPnL: (position.totalRealizedPnL || 0) + pnl,
-                partialSells: (position.partialSells || []).concat({
-                    timestamp: Date.now(),
-                    soldQuantity: tokensSold,
-                    solReceived: solReceived,
-                    pnl: pnl,
-                    reason: reason,
-                    signature: signature,
-                    soldPercentageOfOriginal: soldPercentageOfOriginal,
-                    soldPercentageOfRemaining: soldPercentageOfRemaining,
-                    remainingAfterSell: newRemainingQuantity
-                }),
-                updatedAt: Date.now(),
-                lastSellAt: Date.now(),
-                status: newRemainingQuantity > 0.001 ? 'ACTIVE' : 'CLOSED' // Close if very small amount remaining
-            };
-    
-            // Clear any pending transaction data since we're completing the transaction
-            delete updatedPosition.pendingReason;
-            delete updatedPosition.pendingSellPercentage;
-            delete updatedPosition.pendingStartTime;
-            delete updatedPosition.pendingTxHash;
-            delete updatedPosition.pendingTokenAmount;
-            updatedPosition.retryCount = 0;
-            delete updatedPosition.lastRetryError;
-            delete updatedPosition.lastRetryReason;
-    
-            // If position is effectively closed, handle it
-            if (newRemainingQuantity <= 0.001 || remainingPercentageOfOriginal < 0.1) {
-                logger.info(`✅ POSITION FULLY CLOSED: ${position.symbol}`);
-                updatedPosition.status = 'CLOSED';
-                updatedPosition.closedAt = Date.now();
-                updatedPosition.closeReason = reason;
-                updatedPosition.remainingQuantity = "0";
+            // 🔥 CRITICAL: Always determine if position should stay open
+            const minTokenThreshold = 0.001;
+            const minPercentageThreshold = 0.1;
+            
+            if (newRemainingQuantity > minTokenThreshold && remainingPercentageOfOriginal > minPercentageThreshold) {
+                // PARTIAL SELL - Keep position ACTIVE
+                const updatedPosition = {
+                    ...position,
+                    remainingQuantity: newRemainingQuantity.toString(),
+                    status: 'ACTIVE', // 🔥 CRITICAL: Always reset to ACTIVE for partial sells
+                    totalRealizedPnL: (position.totalRealizedPnL || 0) + pnl,
+                    partialSells: (position.partialSells || []).concat({
+                        timestamp: Date.now(),
+                        soldQuantity: tokensSold,
+                        solReceived: solReceived,
+                        pnl: pnl,
+                        reason: reason,
+                        signature: signature,
+                        soldPercentage: soldPercentage
+                    }),
+                    updatedAt: Date.now(),
+                    lastSellAt: Date.now(),
+                    // 🔥 CRITICAL: Clear ALL pending status and retry info
+                    pendingReason: undefined,
+                    pendingSellPercentage: undefined,
+                    pendingStartTime: undefined,
+                    pendingTxHash: undefined,
+                    pendingTokenAmount: undefined,
+                    retryCount: 0,
+                    lastRetryError: undefined,
+                    lastRetryReason: undefined
+                };
                 
-                // Move to trade history
-                await this.movePositionToHistory(updatedPosition);
-                this.positions.delete(positionId);
-                
-                this.emit('positionClosed', updatedPosition);
-            } else {
-                // Keep position active
                 this.positions.set(positionId, updatedPosition);
+                await this.savePositions();
+                
+                logger.info(`🔄 PARTIAL SELL COMPLETED: ${position.symbol} - ${remainingPercentageOfOriginal.toFixed(1)}% position remaining [ACTIVE]`);
+                logger.info(`💰 Realized PnL so far: ${updatedPosition.totalRealizedPnL.toFixed(6)} SOL`);
                 
                 this.emit('partialSell', {
                     position: updatedPosition,
@@ -737,55 +748,84 @@ class PositionManager extends EventEmitter {
                     },
                     remainingPercentage: remainingPercentageOfOriginal
                 });
-            }
-    
-            await this.savePositions();
-    
-            // 🔥 Send Telegram notification with EXACT transaction data
-            if (this.telegramService && this.telegramService.isEnabled()) {
-                try {
-                    // Check if this was a take profit sell by looking at the reason
-                    const tpMatch = reason.match(/Take Profit (\d+)/);
-                    if (tpMatch) {
-                        const tpLevel = parseInt(tpMatch[1]);
-                        const gainPercentage = ((position.currentPrice - position.entryPrice) / position.entryPrice * 100);
-                        
-                        // Get trailing stop loss info if available
-                        let trailingStopLoss = null;
-                        if (position.pendingTakeProfitData && position.pendingTakeProfitData.trailingStopLoss) {
-                            trailingStopLoss = position.pendingTakeProfitData.trailingStopLoss;
+
+                       
+                // 🔥 ADD THIS: Send Telegram notification with EXACT transaction data
+                if (this.telegramService && this.telegramService.isEnabled()) {
+                    try {
+                        // Check if this was a take profit sell by looking at the reason
+                        const tpMatch = reason.match(/Take Profit (\d+)/);
+                        if (tpMatch) {
+                            const tpLevel = parseInt(tpMatch[1]);
+                            const gainPercentage = ((position.currentPrice - position.entryPrice) / position.entryPrice * 100);
+                            
+                            // 🔥 DEBUG: Log values before sending to telegram
+                            logger.info(`🔍 TELEGRAM DEBUG (updatePositionAfterSell):`);
+                            logger.info(`   tokensSold: ${tokensSold} (type: ${typeof tokensSold})`);
+                            logger.info(`   solReceived: ${solReceived} (type: ${typeof solReceived})`);
+                            logger.info(`   pnl: ${pnl} (type: ${typeof pnl})`);
+                            
+                            const tpData = {
+                                level: tpLevel,
+                                triggerPrice: position.currentPrice,
+                                gainPercentage: gainPercentage,
+                                sellPercentage: soldPercentage,
+                                tokensSold: tokensSold,
+                                solReceived: solReceived,
+                                transactionPnL: pnl,
+                                signature: signature,
+                                priceSource: position.lastPriceSource,
+                                executionMode: this.config.tradingMode,
+                                trailingStopLoss: null
+                            };
+                            
+                            // 🔥 DEBUG: Log the tpData object
+                            logger.info(`🔍 tpData being sent to telegram:`, JSON.stringify(tpData, null, 2));
+                            
+                            await this.telegramService.sendTakeProfitAlert(updatedPosition, tpData);
                         }
-                        
-                        const tpData = {
-                            level: tpLevel,
-                            triggerPrice: position.currentPrice,
-                            gainPercentage: gainPercentage,
-                            sellPercentage: soldPercentageOfRemaining,
-                            tokensSold: tokensSold,
-                            solReceived: solReceived,
-                            transactionPnL: pnl,
-                            priceSource: position.lastPriceSource,
-                            executionMode: this.config.tradingMode,
-                            trailingStopLoss: trailingStopLoss
-                        };
-    
-                        await this.telegramService.sendTakeProfitAlert(updatedPosition, tpData);
-                        
-                        // Clear pending TP data after sending alert
-                        if (updatedPosition.pendingTakeProfitData) {
-                            delete updatedPosition.pendingTakeProfitData;
-                            this.positions.set(positionId, updatedPosition);
-                            await this.savePositions();
-                        }
+                    } catch (error) {
+                        logger.error('❌ Failed to send Telegram take profit alert:', error.message);
                     }
-                } catch (error) {
-                    logger.error('❌ Failed to send Telegram alert:', error.message);
                 }
+                
+            } else {
+                // FULL CLOSE - Move to trade history
+                const totalPnL = (position.totalRealizedPnL || 0) + pnl;
+                
+                const finalPosition = {
+                    ...position,
+                    remainingQuantity: "0",
+                    status: 'CLOSED',
+                    closedAt: Date.now(),
+                    closeReason: reason,
+                    finalTxHash: signature,
+                    solReceived: solReceived,
+                    finalPnL: totalPnL,
+                    updatedAt: Date.now(),
+                    partialSells: (position.partialSells || []).concat({
+                        timestamp: Date.now(),
+                        soldQuantity: tokensSold,
+                        solReceived: solReceived,
+                        pnl: pnl,
+                        reason: reason,
+                        signature: signature,
+                        soldPercentage: soldPercentage,
+                        finalSell: true
+                    })
+                };
+    
+                // Move to trade history and remove from active
+                await this.movePositionToHistory(finalPosition);
+                this.positions.delete(positionId);
+                await this.savePositions();
+                
+                logger.info(`✅ POSITION FULLY CLOSED: ${position.symbol} - Total PnL: ${finalPosition.finalPnL.toFixed(6)} SOL`);
+                
+                this.emit('positionClosed', finalPosition);
             }
     
             logger.info(`✅ POSITION UPDATE COMPLETED: ${position.symbol}`);
-            logger.info(`   Total Realized PnL: ${updatedPosition.totalRealizedPnL.toFixed(6)} SOL`);
-            logger.info(`   Remaining: ${newRemainingQuantity.toLocaleString()} tokens (${remainingPercentageOfOriginal.toFixed(1)}% of original)`);
             
         } catch (error) {
             logger.error(`❌ Failed to update position after sell: ${error.message}`);
@@ -1240,15 +1280,6 @@ class PositionManager extends EventEmitter {
                             stopLossInfo: stopLossInfo
                         }
                     };
-                    
-                    // 🔥 NEW: Send Telegram notification for take profit
-                    if (this.telegramService && this.telegramService.isEnabled()) {
-                        try {
-                            await this.telegramService.sendTakeProfitAlert(position, tpEventData);
-                        } catch (error) {
-                            logger.error('❌ Failed to send Telegram take profit alert:', error.message);
-                        }
-                    }
                     
                     this.emit('takeProfitTriggered', tpEventData);
                     

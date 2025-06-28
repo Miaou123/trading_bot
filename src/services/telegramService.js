@@ -138,6 +138,8 @@ class TelegramService {
                        `💰 Investment: ${investmentFormatted}\n` +
                        `📊 Entry Price: ${entryPriceFormatted}\n` +
                        `🎯 Quantity: \`${parseFloat(position.quantity).toLocaleString()}\` tokens\n\n` +
+                       (position.txHash ? `📝 Entry Signature: \`${position.txHash}\`\n🔗 [View on Solscan](https://solscan.io/tx/${position.txHash})\n` : '') +
+                       `\n` +
                        
                        `**📈 Take Profit Levels:**\n` +
                        await Promise.all(position.takeProfitLevels.map(async tp => {
@@ -158,6 +160,13 @@ class TelegramService {
         if (!this.isInitialized) return;
     
         const modeEmoji = this.config.tradingMode === 'live' ? '🔴' : '📝';
+
+        // 🔥 DEBUG: Log what telegram service receives
+        logger.info(`🔍 TELEGRAM SERVICE RECEIVED:`);
+        logger.info(`   tpData object:`, JSON.stringify(tpData, null, 2));
+        logger.info(`   tpData.tokensSold: ${tpData.tokensSold} (type: ${typeof tpData.tokensSold})`);
+        logger.info(`   tpData.solReceived: ${tpData.solReceived} (type: ${typeof tpData.solReceived})`);
+
         
         // Get transaction details from tpData (passed from position manager)
         const tokensSold = tpData.tokensSold || 0;
@@ -191,6 +200,7 @@ class TelegramService {
                        
                        `**📤 Transaction Recap:**\n` +
                        `• Sold: \`${tokensSoldFormatted}\` **${position.symbol}**  for ${solReceivedFormatted}\n` +
+                       `• [View on Solscan](https://solscan.io/tx/${tpData.signature || ''})\n` +
                        
                        `**💰 Current Bag:**\n` +
                        `• Remaining: \`${remainingQuantity.toLocaleString()}\` tokens (${remainingPercentage.toFixed(1)}% of original)\n` +
@@ -247,6 +257,8 @@ class TelegramService {
                        `• Entry Price: ${entryPriceFormatted}\n` +
                        `• Exit Price: ${exitPriceFormatted}\n` +
                        `• Duration: ${duration}\n\n` +
+                       (slData.signature ? `• Exit Signature: \`${slData.signature}\`\n• [View on Solscan](https://solscan.io/tx/${slData.signature})\n` : '') +
+                       `\n` +
                        
                        `**💰 P&L Summary:**\n` +
                        `• Total P&L: ${totalPnL >= 0 ? '+' : '-'}${totalPnLFormatted}\n` +
