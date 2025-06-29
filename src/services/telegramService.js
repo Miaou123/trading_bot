@@ -222,7 +222,7 @@ class TelegramService {
     // 🔥 UPDATED: Enhanced stop loss alert with USD amounts
     async sendStopLossAlert(position, slData) {
         if (!this.isInitialized) return;
-
+    
         const modeEmoji = this.config.tradingMode === 'live' ? '🔴' : '📝';
         
         const totalRealizedPnL = position.totalRealizedPnL || 0;
@@ -240,12 +240,18 @@ class TelegramService {
         const endTime = position.closedAt || Date.now();
         const duration = startTime ? this.formatDuration(endTime - startTime) : 'Unknown';
         const actualExitPrice = slData.triggerPrice;
-
+    
         // Format amounts with USD
         const investmentFormatted = await this.formatSolWithUSD(position.investedAmount);
         const entryPriceFormatted = await this.formatTokenPrice(position.entryPrice);
         const exitPriceFormatted = await this.formatTokenPrice(actualExitPrice);
         const totalPnLFormatted = await this.formatSolWithUSD(Math.abs(totalPnL));
+        
+        // Get transaction details for the recap
+        const remainingQuantity = parseFloat(position.remainingQuantity || 0);
+        const tokensClosedFormatted = remainingQuantity.toLocaleString();
+        const finalSellValue = remainingValue;
+        const finalSellFormatted = await this.formatSolWithUSD(finalSellValue);
         
         const message = `${modeEmoji} *POSITION CLOSED* ${resultEmoji}\n\n` +
                        `🪙 **${position.symbol}** (${position.tokenAddress.slice(0, 8)}...)\n` +
@@ -257,8 +263,10 @@ class TelegramService {
                        `• Entry Price: ${entryPriceFormatted}\n` +
                        `• Exit Price: ${exitPriceFormatted}\n` +
                        `• Duration: ${duration}\n\n` +
-                       (slData.signature ? `• Exit Signature: \`${slData.signature}\`\n• [View on Solscan](https://solscan.io/tx/${slData.signature})\n` : '') +
-                       `\n` +
+                       
+                       `**📤 Transaction Recap:**\n` +
+                       `• Sold: \`${tokensClosedFormatted}\` **${position.symbol}** for ${finalSellFormatted}\n` +
+                       `• [View on Solscan](https://solscan.io/tx/${slData.signature || position.finalTxHash || 'pending'})\n\n` +
                        
                        `**💰 P&L Summary:**\n` +
                        `• Total P&L: ${totalPnL >= 0 ? '+' : '-'}${totalPnLFormatted}\n` +
@@ -269,11 +277,12 @@ class TelegramService {
                            `**📤 Previous Take Profits:**\n` +
                            await Promise.all(position.partialSells.map(async sell => {
                                const sellPnLFormatted = await this.formatSolWithUSD(Math.abs(sell.pnl));
-                               return `• ${sell.reason}: ${sell.pnl >= 0 ? '+' : '-'}${sellPnLFormatted}`;
-                           })).then(lines => lines.join('\n')) + '\n\n' : '') +
+                               return `• ${sell.reason}: ${sell.pnl >= 0 ? '+' : '-'}${sellPnLFormatted} (${((sell.pnl / position.investedAmount) * 100).toFixed(1)}%)`;
+                           })).then(lines => lines.join('\n')) + '\n\n'
+                           : '') +
                        
                        `⏰ ${new Date().toLocaleString()}`;
-
+        
         await this.sendMessage(message);
     }
 
